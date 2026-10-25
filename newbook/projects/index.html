@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Projects — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="../index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="../index.html">← Back to book</a>
+      <a href="../performance.html">Performance</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Projects</div>
+    <article>
+      <div class="eyebrow">Projects</div>
+      <h1>Twelve standalone tutorials</h1>
+      <p class="lead">Each project is a self-contained tutorial that builds one complete application on top of the library. Start at 01 and work up, or jump to whichever problem interests you — they only depend on the core classes (<code>NeuralNetwork</code>, <code>Trainer</code>, <code>LossFunction</code>, <code>Adam</code>), not on each other.</p>
+
+      <h2>The projects</h2>
+      <div class="cards">
+        <a href="p01.html"><strong>01 · XOR</strong><span>Four examples, one hidden layer. The hello-world of neural networks.</span></a>
+        <a href="p02.html"><strong>02 · MNIST digits</strong><span>Handwritten digit recognition on the original MNIST dataset.</span></a>
+        <a href="p03.html"><strong>03 · Fashion-MNIST</strong><span>The main demo: train, evaluate, confusion matrix, HTML report.</span></a>
+        <a href="p04.html"><strong>04 · Breast cancer</strong><span>Binary classification on the Wisconsin dataset (30 features).</span></a>
+        <a href="p05.html"><strong>05 · Housing prices</strong><span>Regression: predict Boston-area house prices from 13 features.</span></a>
+        <a href="p06.html"><strong>06 · IMDB sentiment</strong><span>Binary text classification with bag-of-words features.</span></a>
+        <a href="p07.html"><strong>07 · Autoencoder</strong><span>Learn a compressed representation and reconstruct the input.</span></a>
+        <a href="p08.html"><strong>08 · Character-level text</strong><span>Generate text one character at a time from a training corpus.</span></a>
+        <a href="p09.html"><strong>09 · Stock prediction</strong><span>Time-series regression with a sliding window.</span></a>
+        <a href="p10.html"><strong>10 · Conv classifier</strong><span>Conv2D + MaxPool2D layers for image classification.</span></a>
+        <a href="p11.html"><strong>11 · Multi-armed bandit</strong><span>Reinforcement learning with epsilon-greedy action selection.</span></a>
+        <a href="p12.html"><strong>12 · GAN</strong><span>Generator and discriminator trained adversarially.</span></a>
+      </div>
+
+      <h2>Prerequisites</h2>
+      <ul>
+        <li>Read chapters 01–09 of the book first — they explain every class these projects use.</li>
+        <li>Projects 02, 03, 10 download their dataset automatically on first run.</li>
+        <li>Projects 04–09 use small built-in datasets or CSV files you provide.</li>
+      </ul>
+
+      <h2>How to run a project</h2>
+      <pre><code># install the library once
+mvn install -DskipTests
+
+# then run any project
+cd projects/fashion-mnist
+mvn compile
+mvn exec:exec -DbatchSize=64</code></pre>
+      <p>Every standalone project has its own <code>pom.xml</code> with the <code>--add-modules jdk.incubator.vector</code> flag pre-configured, so <code>mvn exec:exec</code> just works.</p>
+
+      <div class="paging">
+        <a href="../index.html">← Start here</a>
+        <a href="p01.html">01 · XOR →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

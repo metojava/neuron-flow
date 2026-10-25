@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project 5 · Housing price regression — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="../index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="../index.html">← Back to book</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Project 5</div>
+    <article>
+      <div class="eyebrow">Project 5 · Housing price regression</div>
+      <h1>When the answer is a number, not a label</h1>
+      <p class="lead">All previous projects predicted a category. This one predicts a price — a continuous value that can be off by $1 or by $100,000, and every error in between is meaningful. That changes everything: no argmax, no threshold, just the distance between prediction and truth.</p>
+
+      <h2>What the project does</h2>
+      <p>Given 13 neighbourhood and house attributes (crime rate, number of rooms, age, tax rate, and so on), the network estimates the median house value in thousands of dollars. The interesting part is watching predicted values plotted against actual values — a perfect model would be a straight diagonal line, and you can see exactly where the model starts to struggle.</p>
+
+      <h2>The architecture</h2>
+      <pre><code>int[] topology = {13, 64, 32, 1};
+
+ActivationFunction[] activations = {
+    ActivationFunction.linear(),   // 13 normalized features
+    ActivationFunction.leakyRelu(0.01f),
+    ActivationFunction.relu(),
+    ActivationFunction.linear()    // unbounded price estimate
+};
+
+NeuralNetwork net = new NeuralNetwork(
+    topology, activations,
+    LossFunction.meanSquaredError(),
+    new Adam(0.001f),
+    42L,
+    WeightInitializer.heNormal());</code></pre>
+      <div class="note"><strong>The output must be linear.</strong> A sigmoid or softmax would clamp predictions to a fixed range and squash the whole price scale into it. A linear neuron can output any real number — exactly what a regression target is.</div>
+
+      <h2>Normalizing the targets too</h2>
+      <pre><code>// z-score every feature column: (x - mean) / std
+for (int c = 0; c &lt; 13; c++) {
+    float mean = columnMean(trainX, c);
+    float std  = columnStd(trainX, c, mean);
+    for (float[] row : trainX) row[c] = (row[c] - mean) / std;
+    for (float[] row : testX)  row[c] = (row[c] - mean) / std;  // reuse train stats
+}
+
+// targets scale matters: MSE on raw $30,000 values gives huge gradients
+float tMean = columnMean(trainY, 0);
+float tStd  = columnStd(trainY, 0, tMean);
+scale(trainY, tMean, tStd);
+scale(testY,  tMean, tStd);
+
+net.fit(new Trainer(200, 32, true, 42L), trainX, trainY);</code></pre>
+      <p>Never compute statistics from the test set — reuse the training mean and standard deviation, otherwise information leaks from test into training.</p>
+
+      <h2>Prediction vs actual</h2>
+      <pre><code>System.out.println("   actual   predicted    error");
+
+float sumSq = 0f;
+for (int i = 0; i &lt; testX.length; i++) {
+    float pred = net.predict(testX[i])[0] * tStd + tMean;  // un-scale
+    float real = testY[i][0] * tStd + tMean;
+    sumSq += (pred - real) * (pred - real);
+
+    if (i % 20 == 0) {
+        System.out.printf("%9.1f %10.1f %8.1f%n", real, pred, pred - real);
+    }
+}
+
+System.out.printf("RMSE: %.1f ($K)%n",
+    (float) Math.sqrt(sumSq / testX.length));</code></pre>
+
+      <h2>Expected output</h2>
+      <pre><code>   actual   predicted    error
+     24.0       25.1      1.1
+     21.6       20.4     -1.2
+     34.7       33.8     -0.9
+     50.0       45.3     -4.7
+     19.4       20.8      1.4
+
+RMSE: 3.4 ($K)</code></pre>
+      <p>Plotting the pairs shows a tight diagonal band for houses under $35k and a widening spread at the top — the model regresses toward the mean because extreme prices are rare in the training data. MSE amplifies those large errors, which is why the curve bends there first.</p>
+
+      <h2>What you learn from this project</h2>
+      <ul>
+        <li><strong>Regression heads</strong> — linear output + MSE, and how to invert normalization to report real-world numbers.</li>
+        <li><strong>Why normalization is mandatory</strong> — features with large ranges dominate the gradient; scaled input converges in a fraction of the epochs.</li>
+        <li><strong>RMSE as a readable metric</strong> — "typically off by $3,400" is a statement you can judge; a loss of 0.118 is not.</li>
+        <li><strong>Choosing a robust loss</strong> — swapping in <code>HuberLoss.of()</code> reduces the influence of outlier houses and tightens the top of the range.</li>
+      </ul>
+
+      <div class="paging">
+        <a href="p04.html">← Previous project</a>
+        <a href="p06.html">Next project →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

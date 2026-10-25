@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>16 · Classical machine learning — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html">02 · Forward pass</a>
+      <a href="03-backprop.html">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses &amp; optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html">08 · Downloader &amp; loader</a>
+      <a href="09-keras-like.html">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html">10 · Evaluation &amp; confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html">13 · Run it</a>
+      <a href="14-full-walkthrough.html">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html" class="active">16 · Classical machine learning</a>
+      <a href="17-autograd.html">17 · Autograd</a>
+      <a href="18-transformers.html">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html">20 · GPT</a>
+      <a href="21-api-reference.html">21 · API reference</a>
+      <a href="performance.html">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Chapter 16</div>
+    <article>
+      <div class="eyebrow">16 · Classical machine learning</div>
+      <h1>A scikit-learn-style API for tabular data</h1>
+      <p class="lead">The <code>layers</code> package is built for images and dense neural networks. The <code>ml</code> package is built for rows and columns: mixed numeric/categorical features, missing values, train/test splits, linear models, trees, kernels, and clustering. It borrows scikit-learn's vocabulary — <em>estimator</em>, <em>transformer</em>, <em>pipeline</em> — without hiding the math.</p>
+
+      <h2>16.1 Why a second API?</h2>
+      <p>Tabular problems have different requirements from image problems. A spreadsheet column can be numeric or categorical, can be missing, and can have a wildly different scale from its neighbour. A neural network can absorb raw numbers, but a linear model or an SVM usually cannot. The <code>ml</code> package therefore makes preprocessing a first-class object and validates schemas instead of silently reshaping arrays.</p>
+      <table>
+        <tr><th>Package</th><th>Data type</th><th>Best for</th><th>Entry point</th></tr>
+        <tr><td><code>layers</code></td><td><code>float[]</code> / <code>float[][]</code></td><td>Images, dense and convolutional networks</td><td><code>NeuralNetwork</code></td></tr>
+        <tr><td><code>autograd</code>, <code>transformers</code></td><td><code>float</code> tensors</td><td>Sequence models and custom graphs</td><td><code>Tensor</code>, <code>Ops</code></td></tr>
+        <tr><td><code>ml</code></td><td><code>double</code> columns</td><td>Tabular regression, classification, clustering</td><td><code>DataFrame</code> + <code>Pipeline</code></td></tr>
+        <tr><td><code>data</code></td><td><code>float[][]</code></td><td>CSV/Parquet/IDX loading, CV folds, scaling</td><td>loaders and splitters</td></tr>
+      </table>
+      <div class="note"><strong>Two numeric worlds.</strong> The classical API uses <code>double</code> for numerically sensitive linear algebra; the neural-network stack uses <code>float</code> for SIMD throughput. Convert at the boundary with <code>DataFrame.toDoubleMatrix()</code> and your own float loop; the two packages intentionally do not depend on each other.</div>
+
+      <h2>16.2 DataFrame and Vector</h2>
+      <p><code>ml.DataFrame</code> is an immutable, column-oriented table. Every column is either <code>NUMERIC</code> (a <code>double[]</code>, with <code>Double.NaN</code> as the missing marker) or <code>CATEGORICAL</code> (a <code>String[]</code>, with <code>null</code> as the missing marker). Accessors return defensive copies, so a frame can be shared across pipeline stages without aliasing bugs.</p>
+      <pre><code>DataFrame raw = DataFrame.builder(4)
+        .addNumeric("age",    new double[]{34, 51, Double.NaN, 28})
+        .addNumeric("income", new double[]{62_000, 91_000, 47_000, Double.NaN})
+        .addCategorical("city", new String[]{"Paris", "Berlin", null, "Paris"})
+        .addCategorical("plan", new String[]{"premium", "basic", "premium", null})
+        .build();
+
+int rows = raw.rows();          // 4
+int columns = raw.columns();    // 4
+String[] names = raw.names();   // {"age", "income", "city", "plan"}
+ColumnType[] types = raw.types();
+
+double age = raw.getDouble(0, 0);
+String city = raw.getString(0, 2);
+double[] ages = raw.numericColumn(0);
+int cityIndex = raw.columnIndex("city");</code></pre>
+      <table>
+        <tr><th>Method</th><th>Purpose</th></tr>
+        <tr><td><code>DataFrame.ofNumeric(names, rows)</code></td><td>Build a numeric-only frame from a row-major matrix.</td></tr>
+        <tr><td><code>DataFrame.ofCategorical(names, rows)</code></td><td>Build a categorical-only frame.</td></tr>
+        <tr><td><code>DataFrame.builder(rows)</code></td><td>Build a mixed frame one column at a time.</td></tr>
+        <tr><td><code>select(int...)</code>, <code>takeRows(int[])</code></td><td>Column and row selection, preserving types.</td></tr>
+        <tr><td><code>appendNumericColumn(name, values)</code></td><td>Add an engineered feature.</td></tr>
+        <tr><td><code>toDoubleMatrix()</code></td><td>Row-major matrix; fails if any column is categorical.</td></tr>
+        <tr><td><code>allNumeric()</code></td><td>True when the frame can feed a model directly.</td></tr>
+      </table>
+      <p><code>ml.Vector</code> is the matching immutable target container. Labels are <code>double</code> values, so <code>0/1</code>, <code>-1/+1</code> and arbitrary class ids all work. Useful methods are <code>get</code>, <code>take</code>, <code>toArray</code>, <code>count</code>, <code>uniqueSorted</code>, <code>mean</code> and <code>requireFinite</code>.</p>
+
+      <h2>16.3 Preprocessing transformers</h2>
+      <p>Every transformer implements the same three-method contract:</p>
+      <pre><code>public interface Transformer {
+    Transformer fit(DataFrame X);          // learn parameters
+    DataFrame transform(DataFrame X);      // apply them
+    default DataFrame fitTransform(DataFrame X) { return fit(X).transform(X); }
+    boolean isFitted();
+}</code></pre>
+      <p>Fitting must happen on the training split only. The fitted object is then reused unchanged for validation, test and production data. Calling <code>transform</code> before <code>fit</code> throws <code>IllegalStateException</code>; changing the column names or types after fitting throws <code>IllegalArgumentException</code>.</p>
+
+      <h3>SimpleImputer</h3>
+      <p>Numeric columns use <code>Double.NaN</code>; categorical columns use <code>null</code>. The numeric strategy is <code>MEAN</code> (default), <code>MEDIAN</code> or <code>MOST_FREQUENT</code>. Categorical columns always use the most frequent category because mean and median are undefined for strings. A column with no observed values is filled with <code>0</code> or <code>"__missing__"</code>.</p>
+      <pre><code>Transformer imputer = new SimpleImputer(SimpleImputer.Strategy.MEDIAN);
+DataFrame filled = imputer.fitTransform(raw);
+double[] statistics = ((SimpleImputer) imputer).numericStatistics();</code></pre>
+
+      <h3>OneHotEncoder</h3>
+      <p>Categorical columns become indicator columns named <code>column[category]</code>; numeric columns pass through. Categories are learned in sorted order, which makes output names deterministic. By default the first category is dropped to avoid perfect collinearity in linear models. At transform time an unseen category becomes all zeros, or raises an error if you choose <code>UnknownStrategy.ERROR</code>.</p>
+      <pre><code>OneHotEncoder encoder = new OneHotEncoder(true, OneHotEncoder.UnknownStrategy.IGNORE);
+DataFrame encoded = encoder.fitTransform(filled);
+List&lt;String&gt; produced = encoder.outputNames("city");
+// [city[Berlin], city[Paris]]</code></pre>
+      <div class="warning"><strong>One category only.</strong> With <code>dropFirst=true</code>, a categorical column that contains a single category produces no columns. If every categorical column has one category, <code>transform</code> throws because the result would be empty.</div>
+
+      <h3>StandardScaler and MinMaxScaler</h3>
+      <p><code>StandardScaler</code> computes <code>z = (x - mean) / std</code>, using the population standard deviation. A constant numeric column gets scale <code>1</code>, so it is centred but not divided by zero. <code>MinMaxScaler</code> maps values into a configurable range (default <code>[0, 1]</code>); a constant column maps to the lower bound. Both pass categorical columns through untouched, so they can sit in a mixed pipeline, and both reject non-finite numeric values: impute first.</p>
+      <pre><code>Pipeline pipeline = Pipeline.of(
+        new SimpleImputer(SimpleImputer.Strategy.MEAN),
+        new OneHotEncoder(),
+        new StandardScaler());
+
+DataFrame train = pipeline.fitTransform(split.train());
+DataFrame test  = pipeline.transform(split.test());</code></pre>
+      <p><code>Pipeline.fit</code> fits each stage on the <em>output</em> of the previous one, then stores the fitted stages. This ordering is important: scaling before imputation would compute statistics that include missing markers, and encoding before imputation would create a <code>null</code> category.</p>
+
+      <h2>16.4 Train/test split</h2>
+      <p><code>ml.DatasetSplit.split(X, y, testFraction, seed)</code> shuffles row indices with a seeded <code>Random</code>, then returns a <code>Split</code> record with <code>train()</code>, <code>yTrain()</code>, <code>test()</code>, <code>yTest()</code>, <code>trainSize()</code> and <code>testSize()</code>. The fraction must lie strictly between 0 and 1; at least one row is kept on each side.</p>
+      <pre><code>DatasetSplit.Split split = DatasetSplit.split(raw, labels, 0.25, 42L);</code></pre>
+
+      <h2>16.5 The estimators</h2>
+      <p>Supervised models implement <code>Estimator&lt;M&gt;</code> and <code>Predictor</code>: <code>fit</code> returns the fitted model, <code>predict</code> returns one value per row, and <code>predictProbabilities</code> returns per-class probabilities (or a single column for regression). Fitted getters throw <code>IllegalStateException</code> before training. Every estimator also validates that prediction columns have the same names and order as training.</p>
+
+      <table>
+        <tr><th>Model</th><th>Task</th><th>Training</th><th>Key hyperparameters</th></tr>
+        <tr><td><code>LinearRegression</code></td><td>Regression</td><td>Mini-batch SGD</td><td><code>learningRate</code>, <code>maxEpochs</code>, <code>l2</code>, <code>tolerance</code>, <code>batchSize</code>, <code>seed</code>, <code>fitIntercept</code></td></tr>
+        <tr><td><code>LogisticRegression</code></td><td>Classification</td><td>Mini-batch SGD, one-vs-rest</td><td>same set</td></tr>
+        <tr><td><code>DecisionTree</code></td><td>Classification</td><td>CART splits</td><td><code>criterion</code>, <code>maxDepth</code>, <code>minSamplesSplit</code>, <code>minSamplesLeaf</code>, <code>maxFeatures</code>, <code>seed</code></td></tr>
+        <tr><td><code>RandomForest</code></td><td>Classification</td><td>Bagging + feature subsets</td><td><code>numberOfTrees</code>, tree parameters, <code>maxFeatures</code>, <code>seed</code></td></tr>
+        <tr><td><code>SVM</code></td><td>Classification</td><td>SMO, one-vs-rest</td><td><code>c</code>, <code>kernel</code>, <code>tolerance</code>, <code>maxPasses</code></td></tr>
+        <tr><td><code>KMeans</code></td><td>Clustering</td><td>Lloyd + k-means++</td><td><code>k</code>, <code>maxIterations</code>, <code>tolerance</code>, <code>restarts</code>, <code>seed</code></td></tr>
+      </table>
+
+      <h3>LinearRegression</h3>
+      <p>Fits <code>y = w · x + b</code> by minimising mean squared error plus an optional L2 penalty. The gradient for a mini-batch is</p>
+      <div class="formula">
+        ∂L/∂w = (1/B) Σ (ŷ - y) x + λ w &nbsp;&nbsp;&nbsp; ∂L/∂b = (1/B) Σ (ŷ - y)
+      </div>
+      <p>Rows are reshuffled every epoch with the supplied seed. Training stops early when the epoch loss changes by at most <code>tolerance</code>. The default configuration is <code>learningRate=0.05</code>, <code>maxEpochs=2000</code>, <code>l2=0</code>, <code>tolerance=1e-10</code>, <code>batchSize=32</code>, <code>seed=42</code>, with an intercept. Gradient descent is scale sensitive, so standardise features first. <code>score</code> returns R²; <code>coefficients()</code>, <code>intercept()</code> and <code>epochsRun()</code> expose the fit.</p>
+
+      <h3>LogisticRegression</h3>
+      <p>Binary problems fit one sigmoid model for the larger label; multiclass problems fit one sigmoid per class and normalise the sigmoid outputs at prediction time. The loss is binary log-loss with optional L2. Defaults are <code>learningRate=0.1</code>, <code>maxEpochs=1000</code>, <code>tolerance=1e-8</code>, <code>batchSize=32</code>, <code>seed=42</code>. <code>classes()</code> returns ascending labels, and probability columns follow that order. Multiclass probabilities are normalised but not calibrated.</p>
+
+      <h3>DecisionTree</h3>
+      <p>A CART-style binary tree. At each node it sorts each candidate feature, tries every midpoint between adjacent distinct values, and keeps the split with the largest weighted impurity decrease. Gini impurity is</p>
+      <div class="formula">
+        Gini = 1 - Σ p<sub>k</sub><sup>2</sup> &nbsp;&nbsp;&nbsp;&nbsp; Entropy = -Σ p<sub>k</sub> log<sub>2</sub> p<sub>k</sub>
+      </div>
+      <p>Leaves store the empirical class distribution, so <code>predictProbabilities</code> returns smoothed counts rather than hard labels. Defaults are Gini, <code>maxDepth=10</code>, <code>minSamplesSplit=2</code>, <code>minSamplesLeaf=1</code>, all features, seed 42. <code>featureImportances()</code> reports the normalised impurity decrease attributed to each feature. A single tree cannot extrapolate beyond the training range.</p>
+
+      <h3>RandomForest</h3>
+      <p>Fits many decision trees on bootstrap samples; each split considers a random subset of features. The default feature subset is <code>round(sqrt(numberOfFeatures))</code>. Predictions average the trees' class distributions, which gives smoother probabilities than one tree. The default forest has 100 trees, Gini, depth 8, <code>minSamplesSplit=2</code>, <code>minSamplesLeaf=1</code>, and seed 42. <code>featureImportances()</code> averages the per-tree importances.</p>
+
+      <h3>SVM</h3>
+      <p>A kernel support-vector machine trained with sequential minimal optimisation. Binary problems use one decision function; multiclass problems use one-vs-rest. Kernels implement <code>ml.kernel.Kernel</code>:</p>
+      <pre><code>Kernel linear = Kernel.linear();                 // a · b
+Kernel rbf    = Kernel.rbf(0.25);                // exp(-gamma ||a - b||²)
+Kernel smart  = RbfKernel.withDefaultGamma(6);   // gamma = 1 / features
+
+SVM svm = new SVM(10.0, linear, 1e-4, 100).fit(train, split.yTrain());</code></pre>
+      <p><code>c</code> trades margin width against training errors; larger values fit the training data more closely. The kernel matrix is precomputed, costing <code>O(n²)</code> memory, so this implementation targets small and medium datasets. <code>supportVectorCounts()</code> reports how many support vectors each one-vs-rest model kept. Probabilities are sigmoid-transformed decision values, useful for ranking but not calibrated.</p>
+
+      <h3>KMeans</h3>
+      <p>Unsupervised clustering with k-means++ seeding and multiple restarts. Each restart runs Lloyd's algorithm until the largest centre shift is at most <code>tolerance</code>; the restart with the lowest inertia wins. Empty clusters are repaired by moving them onto the worst-fit point. Defaults are <code>maxIterations=300</code>, <code>tolerance=1e-4</code>, <code>restarts=10</code>, seed 42. <code>fitPredict</code> fits and returns zero-based labels in one call. Standardise features first when their units differ.</p>
+
+      <h2>16.6 End-to-end demo</h2>
+      <p><code>examples.ClassicalMlDemo</code> generates a mixed-type purchase dataset with missing values, fits the preprocessing pipeline on the training split, trains four classifiers, then runs a regression and a clustering example. The essential classification code is:</p>
+      <pre><code>DataFrame raw = DataFrame.builder(rows)
+        .addNumeric("age", age)
+        .addNumeric("income", income)
+        .addNumeric("score", score)
+        .addCategorical("city", city)
+        .addCategorical("plan", plan)
+        .build();
+Vector labels = Vector.of(purchased);
+DatasetSplit.Split split = DatasetSplit.split(raw, labels, 0.25, 42L);
+
+Pipeline pipeline = Pipeline.of(
+        new SimpleImputer(SimpleImputer.Strategy.MEAN),
+        new OneHotEncoder(),
+        new StandardScaler());
+DataFrame train = pipeline.fitTransform(split.train());
+DataFrame test  = pipeline.transform(split.test());
+
+LogisticRegression logistic = new LogisticRegression(0.2, 3_000, 0.0, 1e-10, true)
+        .fit(train, split.yTrain());
+SVM svm = new SVM(10.0, Kernel.linear(), 1e-4, 100)
+        .fit(train, split.yTrain());
+DecisionTree tree = new DecisionTree(DecisionTree.Criterion.GINI, 6)
+        .fit(train, split.yTrain());
+RandomForest forest = new RandomForest(80, DecisionTree.Criterion.GINI, 8, 2, 1,
+        DecisionTree.ALL_FEATURES, 42L).fit(train, split.yTrain());
+
+double accuracy = Metrics.accuracy(split.yTest(), logistic.predict(test));
+double[][] probabilities = logistic.predictProbabilities(test);</code></pre>
+      <p>Run it from the project root:</p>
+      <pre><code>mvn -q -DskipTests compile
+java --add-modules jdk.incubator.vector -cp target/classes examples.ClassicalMlDemo</code></pre>
+      <p>or through the dispatcher: <code>examples.Main ml</code>. Representative output:</p>
+      <pre><code>-- Classification: predicting purchases --
+Raw columns: 5, engineered columns: 6, train/test: 300/100
+LogisticRegression       accuracy = 0.950
+SVM (linear kernel)      accuracy = 0.930
+DecisionTree             accuracy = 0.850
+RandomForest             accuracy = 0.940
+
+-- Regression: predicting house prices --
+Train/test: 135/45, R2 = 0.891, RMSE = 8998
+
+-- Clustering: k-means on three blobs --
+Inertia = 14.165, iterations = 3, cluster sizes = [60, 60, 60]</code></pre>
+      <p>In the classification task the raw frame has five columns; one-hot encoding turns them into six numeric columns. The forest's top importances are <code>income (0.57)</code>, <code>age (0.24)</code>, <code>score (0.14)</code> and <code>plan[premium] (0.02)</code>, which matches the generative process.</p>
+
+      <h2>16.7 Metrics</h2>
+      <table>
+        <tr><th>Metric</th><th>Signature</th><th>Interpretation</th></tr>
+        <tr><td>Accuracy</td><td><code>Metrics.accuracy(yTrue, yPred)</code></td><td>Fraction of exact matches; classification.</td></tr>
+        <tr><td>Mean squared error</td><td><code>Metrics.meanSquaredError(yTrue, yPred)</code></td><td>Average squared residual; lower is better.</td></tr>
+        <tr><td>R²</td><td><code>Metrics.r2Score(yTrue, yPred)</code></td><td>1 is perfect, 0 predicts the mean, negative is worse than the mean.</td></tr>
+      </table>
+      <div class="formula">
+        accuracy = correct / N &nbsp;&nbsp;&nbsp; MSE = (1/N) Σ (y - ŷ)<sup>2</sup> &nbsp;&nbsp;&nbsp; R² = 1 - Σ(y - ŷ)<sup>2</sup> / Σ(y - ȳ)<sup>2</sup>
+      </div>
+      <p>For richer evaluation of the neural-network stack, see <code>evaluation.ClassificationMetrics</code> (confusion matrix, precision/recall/F1), <code>evaluation.RegressionMetrics</code> (MAE, MSE, RMSE, R²), <code>evaluation.AucMetrics</code>, and the bootstrap helpers.</p>
+
+      <h2>16.8 Pitfalls and design rules</h2>
+      <ul>
+        <li><strong>Fit on train, transform test.</strong> Never call <code>fitTransform</code> on the test split; that leaks statistics.</li>
+        <li><strong>Models need numeric frames.</strong> Encode categorical columns and impute missing values first. <code>ModelUtils</code> rejects non-finite features with a message naming the column.</li>
+        <li><strong>Column names and order are checked.</strong> A model trained on <code>[age, income]</code> will refuse a frame whose first column is <code>income</code>.</li>
+        <li><strong>Scaling is not optional for linear models and SVMs.</strong> Income in thousands can dominate age in years; standardise first.</li>
+        <li><strong>Trees ignore scale</strong> but still reject missing values. Impute, then fit.</li>
+        <li><strong>SVM memory grows quadratically.</strong> A 50,000-row kernel matrix has 2.5 billion entries; subsample or use a linear solver for large data.</li>
+        <li><strong>Probabilities are not calibrated.</strong> Logistic and SVM probabilities rank examples well but should not be read as exact frequencies without a calibration step.</li>
+        <li><strong>Seeds make runs reproducible.</strong> Splits, shuffles, forest bootstrap samples, k-means++ seeds and tree feature subsets all take a seed.</li>
+        <li><strong>Class labels are doubles.</strong> <code>1.0</code> and <code>1</code> are the same label; <code>0.999999</code> is a different one. Use exact values.</li>
+      </ul>
+
+      <h2>16.9 Quick reference</h2>
+      <table>
+        <tr><th>Class</th><th>Important methods</th></tr>
+        <tr><td><code>DataFrame</code></td><td><code>builder</code>, <code>ofNumeric</code>, <code>ofCategorical</code>, <code>rows</code>, <code>columns</code>, <code>names</code>, <code>types</code>, <code>numericColumn</code>, <code>categoricalColumn</code>, <code>select</code>, <code>takeRows</code>, <code>toDoubleMatrix</code></td></tr>
+        <tr><td><code>Vector</code></td><td><code>of</code>, <code>copyOf</code>, <code>zeros</code>, <code>get</code>, <code>take</code>, <code>toArray</code>, <code>uniqueSorted</code>, <code>mean</code></td></tr>
+        <tr><td><code>Pipeline</code></td><td><code>of</code>, <code>then</code>, <code>fit</code>, <code>transform</code>, <code>fitTransform</code>, <code>transformers</code></td></tr>
+        <tr><td><code>DatasetSplit</code></td><td><code>split</code> → <code>Split.train</code>, <code>yTrain</code>, <code>test</code>, <code>yTest</code></td></tr>
+        <tr><td><code>LinearRegression</code></td><td><code>fit</code>, <code>predict</code>, <code>score</code>, <code>coefficients</code>, <code>intercept</code>, <code>epochsRun</code></td></tr>
+        <tr><td><code>LogisticRegression</code></td><td><code>fit</code>, <code>predict</code>, <code>predictProbabilities</code>, <code>score</code>, <code>classes</code>, <code>coefficients</code>, <code>intercepts</code></td></tr>
+        <tr><td><code>DecisionTree</code></td><td><code>fit</code>, <code>predict</code>, <code>predictProbabilities</code>, <code>score</code>, <code>classes</code>, <code>featureImportances</code></td></tr>
+        <tr><td><code>RandomForest</code></td><td><code>fit</code>, <code>predict</code>, <code>predictProbabilities</code>, <code>score</code>, <code>featureImportances</code></td></tr>
+        <tr><td><code>SVM</code></td><td><code>fit</code>, <code>predict</code>, <code>predictProbabilities</code>, <code>score</code>, <code>supportVectorCounts</code>, <code>biases</code></td></tr>
+        <tr><td><code>KMeans</code></td><td><code>fit</code>, <code>predict</code>, <code>fitPredict</code>, <code>inertia</code>, <code>clusterCenters</code>, <code>iterationsRun</code></td></tr>
+      </table>
+
+      <h2>16.10 Exercises</h2>
+      <ol>
+        <li>Add an <code>AgeBands</code> feature that buckets age into <code>"young"</code>, <code>"middle"</code> and <code>"senior"</code>, then compare logistic accuracy with and without it.</li>
+        <li>Swap the linear SVM for <code>RbfKernel.withDefaultGamma(train.columns())</code> and tune <code>c</code> over <code>{0.1, 1, 10, 100}</code> using the test split.</li>
+        <li>Implement a <code>Transformer</code> that standardises only selected numeric columns and leaves the rest alone.</li>
+        <li>Run <code>DatasetSplit.split</code> with ten different seeds and report the mean and standard deviation of random-forest accuracy.</li>
+        <li>Replace <code>Metrics.accuracy</code> with a macro-F1 score computed from the confusion matrix and explain why the ranking of models can change.</li>
+      </ol>
+
+      <div class="paging">
+        <a href="15-practice.html">← 15 · Practice</a>
+        <a href="17-autograd.html">17 · Autograd →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

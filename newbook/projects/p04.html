@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project 4 · Breast cancer classification — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="../index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="../index.html">← Back to book</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Project 4</div>
+    <article>
+      <div class="eyebrow">Project 4 · Breast cancer classification</div>
+      <h1>Two classes, thirty features, and the cost of a wrong answer</h1>
+      <p class="lead">This project trains a binary classifier on the Wisconsin breast-cancer dataset: 569 samples, 30 real-valued features measured from cell nuclei, and one label (malignant or benign). It is the first project where accuracy alone is not enough — missing a malignant case matters much more than a false alarm, so we report precision and recall.</p>
+
+      <h2>What the project does</h2>
+      <p>Given 30 numbers per patient (radius, texture, perimeter, area, smoothness, and so on), the network outputs a single value in (0, 1): the estimated probability of malignancy. Thresholding at 0.5 turns that probability into a decision, and the confusion matrix turns decisions into precision and recall.</p>
+      <div class="formula">
+        P(y = 1 | x) = σ(z) ∈ (0, 1) &nbsp;&nbsp;→&nbsp;&nbsp; predict malignant if P ≥ 0.5
+      </div>
+
+      <h2>The architecture</h2>
+      <pre><code>int[] topology = {30, 16, 8, 1};
+
+ActivationFunction[] activations = {
+    ActivationFunction.linear(),   // 30 normalized features
+    ActivationFunction.relu(),     // hidden layer 1
+    ActivationFunction.relu(),     // hidden layer 2
+    ActivationFunction.sigmoid()   // single probability
+};
+
+NeuralNetwork net = new NeuralNetwork(
+    topology, activations,
+    LossFunction.binaryCrossEntropy(),
+    new Adam(0.001f),
+    42L,
+    WeightInitializer.heNormal());</code></pre>
+      <div class="note"><strong>Why BCE instead of MSE?</strong> With a sigmoid output, binary cross-entropy gives a gradient proportional to <code>ŷ − y</code> with no saturation term — the network learns fast even when it is confidently wrong. MSE on a sigmoid has a gradient multiplied by <code>σ'(z)</code>, which shrinks near 0 and 1 and stalls training.</div>
+
+      <h2>Preparing the data</h2>
+      <pre><code>// 569 rows × 30 columns, min-max scaled to [0, 1]
+float[][] x = readFeatures("wdbc.data");
+int[]     y = readLabels("wdbc.data");   // 0 = benign, 1 = malignant
+
+float[][] targets = new float[y.length][1];
+for (int i = 0; i &lt; y.length; i++) {
+    targets[i][0] = y[i];
+}
+
+// 80 / 20 split, shuffled with a fixed seed
+net.fit(new Trainer(100, 16, true, 42L),
+    trainX, trainTargets);</code></pre>
+      <p>Features are scaled before the split — otherwise a column measured in millimetres (like perimeter, 6–28) would dominate one measured as a ratio (0.05–0.16).</p>
+
+      <h2>Predictions, precision and recall</h2>
+      <pre><code>int[] predicted = new int[testX.length];
+
+for (int i = 0; i &lt; testX.length; i++) {
+    float p = net.predict(testX[i])[0];
+    predicted[i] = p &gt;= 0.5f ? 1 : 0;
+}
+
+int[][] confusion = ClassificationMetrics
+    .confusionMatrix(predicted, testY, 2);
+
+System.out.printf("Accuracy: %.2f%%%n",
+    ClassificationMetrics.accuracy(predicted, testY) * 100);
+System.out.printf("Precision: %.3f%n",
+    ClassificationMetrics.precision(confusion, 1));
+System.out.printf("Recall:    %.3f%n",
+    ClassificationMetrics.recall(confusion, 1));</code></pre>
+
+      <h2>Expected output</h2>
+      <pre><code>Accuracy:  96.49% (110/114)
+Precision: 0.957
+Recall:    0.979
+F1:        0.968
+
+Confusion matrix (rows = actual, cols = predicted):
+              benign  malignant
+benign           69       2
+malignant         1      42</code></pre>
+      <p>Two false positives (benign flagged as malignant) are cheap — they lead to a second test. One false negative would be dangerous, so we check the malignant row: 42 of 43 caught, recall 0.979. Lowering the threshold to 0.35 would raise recall further at the cost of more false alarms.</p>
+
+      <h2>What you learn from this project</h2>
+      <ul>
+        <li><strong>Binary output design</strong> — one sigmoid neuron, one BCE loss, one threshold: the complete recipe for two-class problems.</li>
+        <li><strong>Metric selection</strong> — accuracy, precision, recall and F1 answer different questions; the right metric depends on which mistake is expensive.</li>
+        <li><strong>Class imbalance awareness</strong> — 357 benign vs 212 malignant: accuracy can look fine while the minority class is ignored, which is why per-class numbers matter.</li>
+        <li><strong>Feature scaling</strong> — mixed units require normalization; unscaled input makes training slower and results unstable.</li>
+      </ul>
+
+      <div class="paging">
+        <a href="p03.html">← Previous project</a>
+        <a href="p05.html">Next project →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

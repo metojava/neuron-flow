@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Performance notes: Fashion-MNIST CNN</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; max-width: 980px; margin: 2em auto; padding: 0 1em; line-height: 1.5; color: #222; }
+  h1 { border-bottom: 2px solid #444; padding-bottom: .2em; }
+  h2 { margin-top: 2em; border-bottom: 1px solid #ccc; padding-bottom: .15em; }
+  h3 { margin-top: 1.5em; }
+  pre { background: #f5f5f5; border: 1px solid #ddd; padding: .8em; overflow-x: auto; font-size: 16px; }
+  code { font-family: Consolas, monospace; font-size: 16px; }
+  table { border-collapse: collapse; margin: 1em 0; }
+  th, td { border: 1px solid #bbb; padding: .4em .7em; text-align: right; vertical-align: top; }
+  th:first-child, td:first-child { text-align: left; }
+  td.note { text-align: left; }
+  .path { font-family: Consolas, monospace; background: #eef; padding: 0 .25em; }
+</style>
+</head>
+<body>
+
+<h1>Performance notes: Fashion-MNIST CNN</h1>
+
+<p>This document describes how the training speed of the convolutional Fashion-MNIST classifier was improved, which files changed, and what was measured. Paths are relative to the project root
+<span class="path">C:\Users\dell\Documents\Codex\2026-10-23\nfs</span>.</p>
+
+<h2>1. Starting point</h2>
+
+<p>The first CNN lived in a self-contained file, <span class="path">projects/fashion-mnist/src/main/java/FashionConvNet.java</span>. It had its own convolution, pooling and dense code. Every loop was scalar, and every layer allocated new nested arrays for each image.</p>
+
+<p>Baseline, 60 000 training images, 2 epochs, batch size 128, 10 000 test images:</p>
+
+<table>
+  <tr><th>Configuration</th><th>Epoch time</th><th>Total incl. data load</th><th>Test accuracy</th></tr>
+  <tr><td class="note">Serial, scalar convolution (baseline)</td><td>~97 s</td><td>209 s</td><td>76.86%</td></tr>
+</table>
+
+<p>A Java Flight Recorder profile (<code>-XX:StartFlightRecording</code>) showed that almost all time was in the convolution inner loops and in the dense dot products.</p>
+
+<h2>2. Summary</h2>
+
+<table>
+  <tr><th>Step</th><th>Change</th><th>Epoch time (batch 128)</th><th>Total incl. data load</th></tr>
+  <tr><td class="note">Baseline</td><td class="note">Serial, scalar code</td><td>~97 s</td><td>209 s</td></tr>
+  <tr><td class="note">A. Vector API in convolution</td><td class="note">SIMD for stride-1 convolution rows</td><td>35 s</td><td>82 s</td></tr>
+  <tr><td class="note">B. Four worker threads</td><td class="note">Data-parallel mini-batch training</td><td>13 s</td><td>39 s</td></tr>
+  <tr><td class="note">C. Plane-vectorized convolution, row-major dense layer</td><td class="note">One SIMD call per kernel tap over a whole feature-map plane</td><td>8 s</td><td>29 s</td></tr>
+  <tr><td class="note">D. In-place ReLU</td><td class="note">No temporary tensors for ReLU forward and backward</td><td>6 s</td><td>24 s</td></tr>
+</table>
+
+<p>Batch size 512 follows the same path: about 17 s per epoch after step B, and about 6 s after step D. Accuracy at batch 512 is lower (65.32%) because there are fewer weight updates at the same learning rate (0.01).</p>
+
+<h2>3. Step A: Vector API in the convolution</h2>
+
+<p>The library's <code>VectorMath</code> class already used <code>jdk.incubator.vector</code> for dense operations. Two range-based primitives were added so that convolution rows can be processed as contiguous SIMD operations, with offsets into both arrays.</p>
+
+<p><b>Changed file:</b> <span class="path">src/main/java/vector/VectorMath.java</span></p>
+
+<pre><code>// out[outOff + i] += scalar * in[inOff + i]  for i in [0, n)
+public static void axpyRange(float[] out, int outOff, float scalar,
+                             float[] in, int inOff, int n) {
+    int i = 0;
+    int limit = SPECIES.loopBound(n);
+    FloatVector vScalar = FloatVector.broadcast(SPECIES, scalar);
+
+    for (; i &lt; limit; i += SPECIES.length()) {
+        FloatVector vo = FloatVector.fromArray(SPECIES, out, outOff + i);
+        FloatVector vi = FloatVector.fromArray(SPECIES, in, inOff + i);
+        vScalar.fma(vi, vo).intoArray(out, outOff + i);
+    }
+    for (; i &lt; n; i++) {
+        out[outOff + i] += scalar * in[inOff + i];
+    }
+}
+
+// sum over i in [0, n) of a[aOff + i] * b[bOff + i]
+public static float dotRange(float[] a, int aOff,
+                             float[] b, int bOff, int n) {
+    int i = 0;
+    int limit = SPECIES.loopBound(n);
+    FloatVector acc = FloatVector.zero(SPECIES);
+
+    for (; i &lt; limit; i += SPECIES.length()) {
+        FloatVector va = FloatVector.fromArray(SPECIES, a, aOff + i);
+        FloatVector vb = FloatVector.fromArray(SPECIES, b, bOff + i);
+        acc = va.fma(vb, acc);
+    }
+    float sum = acc.reduceLanes(VectorOperators.ADD);
+    for (; i &lt; n; i++) {
+        sum += a[aOff + i] * b[bOff + i];
+    }
+    return sum;
+}</code></pre>
+
+<p>The first version of <code>Conv2D</code> called <code>axpyRange</code> once per output row and kernel tap. That made the vector loop profitable only for wide rows; the 7- and 14-pixel rows of the later layers mostly ran the scalar tail loop. Step C fixes this.</p>
+
+<p><b>Changed file:</b> <span class="path">src/main/java/layers/Conv2D.java</span> (the stride-1 path is written in step C; the scalar path for other strides is unchanged).</p>
+
+<p>Because the Vector API is incubating, running any class that uses it needs <code>--add-modules jdk.incubator.vector</code>. The compiler configuration in <span class="path">pom.xml</span> already provides it, and the Surefire configuration gained the same argument so that the tests can load the classes.</p>
+
+<h2>4. Step B: data-parallel training on four threads</h2>
+
+<p>One mini-batch was processed by one thread. The machine has 4 physical cores (8 logical), so the batch was split across replicas of the model.</p>
+
+<p><b>New file:</b> <span class="path">src/main/java/training/DataParallelTrainer.java</span></p>
+
+<p>Each worker owns a replica (its own forward and backward caches). For every batch:</p>
+<ol>
+  <li>The master weights are read once into a flat array (<code>getParameters</code>).</li>
+  <li>Each replica copies those weights, zeroes its gradients, and processes its contiguous slice of the batch.</li>
+  <li>The replica gradients are summed in a fixed order (deterministic for a fixed thread count).</li>
+  <li>The master receives the summed gradients (<code>setGradients</code>) and applies one SGD step.</li>
+</ol>
+
+<pre><code>for (int start = 0; start &lt; count; start += batchSize) {
+    int end = Math.min(start + batchSize, count);
+    int n = end - start;
+    int chunk = (n + threads - 1) / threads;
+    float[] params = master.getParameters();
+
+    for (int t = 0; t &lt; threads; t++) {
+        final ConvClassifier replica = replicas[t];
+        final int from = Math.min(start + t * chunk, end);
+        final int to = Math.min(from + chunk, end);
+        futures[t] = pool.submit(() -&gt; {
+            replica.setParameters(params);
+            replica.zeroGrad();
+            double loss = 0.0;
+            for (int i = from; i &lt; to; i++) {
+                int id = order[i];
+                replica.forward(images[id]);
+                loss += replica.backward(labels[id]);
+            }
+            return loss;
+        });
+    }
+
+    Arrays.fill(gradSum, 0.0f);
+    for (int t = 0; t &lt; threads; t++) {
+        totalLoss += await(futures[t]);
+        float[] g = replicas[t].getGradients();
+        for (int k = 0; k &lt; g.length; k++) {
+            gradSum[k] += g[k];
+        }
+    }
+    master.setGradients(gradSum);
+    master.applyUpdate(lr, n);
+}</code></pre>
+
+<p>Supporting changes were needed so that a model can be copied and its gradients moved as one flat vector:</p>
+
+<ul>
+  <li><span class="path">src/main/java/layers/Conv2D.java</span>, <span class="path">src/main/java/layers/Dense.java</span>: <code>copyParametersTo</code>, <code>copyParametersFrom</code>, <code>copyGradientsTo</code>, <code>copyGradientsFrom</code>.</li>
+  <li><span class="path">src/main/java/layers/ConvClassifier.java</span>: <code>getParameters()</code>, <code>setParameters(float[])</code>, <code>getGradients()</code>, <code>setGradients(float[])</code>. The layout is conv1, conv2, dense1, dense2.</li>
+</ul>
+
+<p>Correctness check: <span class="path">src/test/java/training/DataParallelTrainerTest.java</span> trains one epoch serially and with 3 workers on an odd-sized dataset (37 samples, batch 8) and asserts that all parameters agree within 1e-4.</p>
+
+<p>The application picks the worker count from its arguments (default <code>min(4, availableProcessors)</code>):</p>
+
+<pre><code>int threads = args.length &gt; 5 ? Integer.parseInt(args[5])
+    : Math.min(4, Runtime.getRuntime().availableProcessors());
+
+try (DataParallelTrainer trainer = new DataParallelTrainer(net,
+        () -&gt; compact
+            ? ConvClassifier.compact(123L, side, FashionMNISTLoader.NUM_CLASSES)
+            : new ConvClassifier(123L, side, FashionMNISTLoader.NUM_CLASSES),
+        threads)) {
+    for (int epoch = 1; epoch &lt;= epochs; epoch++) {
+        shuffle(order, random);
+        double loss = trainer.trainEpoch(data.trainImages(), data.trainLabels(),
+            order, count, batchSize, learningRate);
+        ...
+    }
+}</code></pre>
+
+<p><b>Changed file:</b> <span class="path">projects/fashion-mnist/src/main/java/FashionCNNApp.java</span>.</p>
+
+<h2>5. Step C: plane-vectorized convolution and row-major dense layer</h2>
+
+<h3>5.1 Why the row version was not enough</h3>
+
+<p>The profile after step B showed that <code>axpyRange</code> and <code>dotRange</code> were the hot spots, with most time in their scalar tail loops. Feature maps in this network are 28, 14 and 7 pixels wide, and the Vector API's preferred species holds 8 floats. A 7-wide row never reaches the vector loop.</p>
+
+<h3>5.2 Padded plane layout</h3>
+
+<p>For stride 1, the input is zero-padded once into a buffer with row width <code>wp = inW + 2*padding</code>. Output position <code>(oh, ow)</code> is stored at flat index <code>oh*wp + ow</code>, and kernel tap <code>(kh, kw)</code> reads the input at flat index <code>(oh*wp + ow) + kh*wp + kw</code>. Each tap is therefore a single contiguous operation over the whole output plane. Columns <code>ow &gt;= outW</code> are computed but discarded, which costs a few percent of extra work but keeps every operation long enough for SIMD.</p>
+
+<p><b>Changed file:</b> <span class="path">src/main/java/layers/Conv2D.java</span> (<code>forwardStride1</code>, <code>backwardStride1</code>).</p>
+
+<pre><code>private float[][][] forwardStride1(float[][][] input, int inH,
+                                   int inW, int outH, int outW) {
+    int wp = inW + 2 * padding;
+    int hp = inH + 2 * padding;
+    int planeOut = outH * wp;
+
+    paddedCache = new float[inChannels][hp * wp + kernelW];
+    for (int ic = 0; ic &lt; inChannels; ic++) {
+        for (int ih = 0; ih &lt; inH; ih++) {
+            System.arraycopy(input[ic][ih], 0, paddedCache[ic],
+                (ih + padding) * wp + padding, inW);
+        }
+    }
+
+    float[][][] output = new float[outChannels][outH][outW];
+    float[] acc = new float[planeOut];
+
+    for (int oc = 0; oc &lt; outChannels; oc++) {
+        Arrays.fill(acc, biases[oc]);
+        for (int ic = 0; ic &lt; inChannels; ic++) {
+            for (int kh = 0; kh &lt; kernelH; kh++) {
+                for (int kw = 0; kw &lt; kernelW; kw++) {
+                    VectorMath.axpyRange(acc, 0,
+                        weights[oc][ic][kh][kw],
+                        paddedCache[ic], kh * wp + kw, planeOut);
+                }
+            }
+        }
+        for (int oh = 0; oh &lt; outH; oh++) {
+            System.arraycopy(acc, oh * wp, output[oc][oh], 0, outW);
+        }
+    }
+    return output;
+}</code></pre>
+
+<p>The backward pass mirrors this. The output gradient is placed in the same padded layout (with zeros in the discarded columns), the weight gradient of each tap is one <code>dotRange</code> over the plane, and the input gradient is one <code>axpyRange</code> into a padded gradient buffer that is cropped at the end.</p>
+
+<pre><code>for (int ic = 0; ic &lt; inChannels; ic++) {
+    for (int kh = 0; kh &lt; kernelH; kh++) {
+        for (int kw = 0; kw &lt; kernelW; kw++) {
+            int shift = kh * wp + kw;
+            weightGrads[oc][ic][kh][kw] += VectorMath.dotRange(
+                g, 0, paddedCache[ic], shift, planeOut);
+            VectorMath.axpyRange(dPadded[ic], shift,
+                weights[oc][ic][kh][kw], g, 0, planeOut);
+        }
+    }
+}</code></pre>
+
+<p>Bounds: with <code>planeOut = outH * wp</code> and <code>outH = hp - kernelH + 1</code>, the largest index read is <code>hp*wp + kernelW - 1</code>, so the padded buffer is allocated with <code>kernelW</code> extra elements.</p>
+
+<p>Stride values other than 1 keep the original scalar loops in <code>Conv2D.forward</code> and <code>Conv2D.backward</code>. No network in the project uses them.</p>
+
+<h3>5.3 Row-major dense layer</h3>
+
+<p>The forward pass of <code>Dense</code> iterated over outputs in the outer loop and over inputs in the inner loop, so it read the weight matrix column by column. It is now row-major, and both passes use the vector primitives.</p>
+
+<p><b>Changed file:</b> <span class="path">src/main/java/layers/Dense.java</span> (new file in this project; the original dense code was in <span class="path">FashionConvNet.java</span>).</p>
+
+<pre><code>public float[] forward(float[] x) {
+    inputCache = x.clone();
+    float[] result = new float[out];
+    System.arraycopy(b, 0, result, 0, out);
+    for (int i = 0; i &lt; in; i++) {
+        VectorMath.axpyRange(result, 0, x[i], w[i], 0, out);
+    }
+    return result;
+}
+
+public float[] backward(float[] dOut) {
+    float[] dIn = new float[in];
+    for (int i = 0; i &lt; in; i++) {
+        VectorMath.axpyRange(dw[i], 0, inputCache[i], dOut, 0, out);
+        dIn[i] = VectorMath.dotRange(w[i], 0, dOut, 0, out);
+    }
+    for (int j = 0; j &lt; out; j++) {
+        db[j] += dOut[j];
+    }
+    return dIn;
+}</code></pre>
+
+<h3>5.4 Results of step C</h3>
+
+<p>Epoch time at batch 128 went from 13 s to 8 s; at batch 512 from 17 s to 8.7–12 s (the two epochs differed in that run). The library tests (38 at this point) passed unchanged, including the naive-reference comparison for stride-1 convolution across several padding and kernel shapes (<span class="path">src/test/java/layers/Conv2DTest.java</span>).</p>
+
+<h2>6. Step D: in-place ReLU</h2>
+
+<p>ReLU in <code>ConvClassifier</code> allocated a new tensor for every layer on the forward and backward passes. The backward mask only needs the sign of the pre-activation, and ReLU preserves that sign, so the rectified value can be stored in place and used as the mask.</p>
+
+<p><b>Changed files:</b></p>
+<ul>
+  <li><span class="path">src/main/java/activations/Activations.java</span>: new <code>reluInPlace</code> and <code>reluBackwardInPlace</code> for <code>float[][][]</code> and <code>float[]</code>.</li>
+  <li><span class="path">src/main/java/layers/ConvClassifier.java</span>: forward and backward use the in-place versions.</li>
+</ul>
+
+<pre><code>// forward
+c1 = conv1.forward(img);
+reluInPlace(c1);                    // c1 is now post-ReLU
+float[][][] p1 = pool1.forward(c1);
+c2 = conv2.forward(p1);
+reluInPlace(c2);
+float[][][] p2 = pool2.forward(c2);
+h1 = dense1.forward(Flatten.flattenChannelsFirst(p2));
+reluInPlace(h1);
+logits = dense2.forward(h1);
+
+// backward
+d = dense2.backward(d);
+reluBackwardInPlace(d, h1);         // mask from post-ReLU h1
+d = dense1.backward(d);
+float[][][] dR2 = pool2.backward(dP2);
+reluBackwardInPlace(dR2, c2);
+float[][][] dP1 = conv2.backward(dR2);
+float[][][] dR1 = pool1.backward(dP1);
+reluBackwardInPlace(dR1, c1);
+conv1.backward(dR1);</code></pre>
+
+<p>The in-place operations are safe because each conv, dense and pooling output is a fresh array owned by the model, and no caller keeps a reference to it.</p>
+
+<h2>7. Supporting refactor (needed by the changes above)</h2>
+
+<p>These changes were required to move the CNN into the library and make it usable by the optimized code paths:</p>
+
+<table>
+  <tr><th>File</th><th>Change</th></tr>
+  <tr><td class="note"><span class="path">src/main/java/layers/Conv2D.java</span></td><td class="note">Multi-channel input, <code>backward</code>, gradient accumulators, <code>update</code>, <code>zeroGrad</code>; He init uses fan-in <code>inChannels*kH*kW</code>.</td></tr>
+  <tr><td class="note"><span class="path">src/main/java/layers/MaxPool2D.java</span></td><td class="note">Multi-channel <code>forward</code> caches argmax; new <code>backward</code>.</td></tr>
+  <tr><td class="note"><span class="path">src/main/java/layers/Dense.java</span></td><td class="note">New fully connected layer with gradient accumulation.</td></tr>
+  <tr><td class="note"><span class="path">src/main/java/layers/ConvClassifier.java</span></td><td class="note">New model class (conv, pool, conv, pool, dense, dense) used by the application.</td></tr>
+  <tr><td class="note"><span class="path">src/main/java/layers/Flatten.java</span></td><td class="note"><code>flattenChannelsFirst</code> and <code>unflattenChannelsFirst</code>. The existing <code>flatten(float[][][])</code> assumes channel-last order, so it was not reused.</td></tr>
+  <tr><td class="note"><span class="path">src/main/java/activations/Activations.java</span></td><td class="note">ReLU and ReLU-gradient helpers for vectors and tensors.</td></tr>
+  <tr><td class="note"><span class="path">projects/fashion-mnist/src/main/java/FashionConvNet.java</span></td><td class="note"><b>Deleted.</b> Replaced by the library classes above.</td></tr>
+  <tr><td class="note"><span class="path">projects/fashion-mnist/src/test/java/FashionConvNetTest.java</span></td><td class="note"><b>Deleted.</b> Its cases moved to <span class="path">src/test/java/layers/ConvClassifierTest.java</span>.</td></tr>
+</table>
+
+<h2>8. Tests that guard the optimizations</h2>
+
+<table>
+  <tr><th>Test class</th><th>What it checks</th></tr>
+  <tr><td class="note"><span class="path">src/test/java/layers/Conv2DTest.java</span></td><td class="note">Finite-difference gradients (stride 1 and stride 2); vectorized stride-1 forward against a naive reference for several padding and kernel shapes.</td></tr>
+  <tr><td class="note"><span class="path">src/test/java/layers/MaxPool2DTest.java</span></td><td class="note">Gradient is routed only to window maxima.</td></tr>
+  <tr><td class="note"><span class="path">src/test/java/layers/DenseTest.java</span></td><td class="note">Finite-difference input gradient and SGD weight step.</td></tr>
+  <tr><td class="note"><span class="path">src/test/java/layers/ConvClassifierTest.java</span></td><td class="note">Training lowers loss on a repeated sample; compact model is smaller; small input sizes; invalid input and label handling.</td></tr>
+  <tr><td class="note"><span class="path">src/test/java/activations/ReluHelpersTest.java</span></td><td class="note">Vector and tensor ReLU and gradient rules.</td></tr>
+  <tr><td class="note"><span class="path">src/test/java/training/DataParallelTrainerTest.java</span></td><td class="note">Parallel epoch equals serial mini-batch training within 1e-4.</td></tr>
+</table>
+
+<p>Final state: 38 library tests pass with <code>mvn test</code> in the project root.</p>
+
+<h2>9. Measurements</h2>
+
+<h3>9.1 Batch size 128</h3>
+
+<table>
+  <tr><th>Step</th><th>Epoch 1</th><th>Epoch 2</th><th>Training total</th><th>Evaluation (10 000)</th><th>Test accuracy</th></tr>
+  <tr><td class="note">Baseline</td><td>97.27 s</td><td>95.93 s</td><td>193.20 s</td><td>6.47 s</td><td>76.86%</td></tr>
+  <tr><td class="note">A. Vector API</td><td>35.00 s</td><td>34.87 s</td><td>69.88 s</td><td>2.47 s</td><td>76.86%</td></tr>
+  <tr><td class="note">B. 4 threads</td><td>13.30 s</td><td>14.38 s</td><td>27.71 s</td><td>2.40 s</td><td>76.90%</td></tr>
+  <tr><td class="note">C. Plane conv, dense</td><td>8.28 s</td><td>7.59 s</td><td>15.89 s</td><td>1.61 s</td><td>76.82%</td></tr>
+  <tr><td class="note">D. In-place ReLU</td><td>6.52 s</td><td>5.81 s</td><td>12.36 s</td><td>1.26 s</td><td>76.82%</td></tr>
+</table>
+
+<h3>9.2 Batch size 512</h3>
+
+<table>
+  <tr><th>Step</th><th>Epoch 1</th><th>Epoch 2</th><th>Training total</th><th>Evaluation (10 000)</th><th>Test accuracy</th></tr>
+  <tr><td class="note">B. 4 threads</td><td>17.35 s</td><td>17.85 s</td><td>35.21 s</td><td>3.11 s</td><td>65.32%</td></tr>
+  <tr><td class="note">C. Plane conv, dense</td><td>8.65 s</td><td>11.97 s</td><td>20.65 s</td><td>3.03 s</td><td>65.32%</td></tr>
+  <tr><td class="note">D. In-place ReLU</td><td>6.10 s</td><td>5.60 s</td><td>11.72 s</td><td>1.18 s</td><td>65.32%</td></tr>
+</table>
+
+<p>Epoch 2 at batch 512 varied between runs (8.65 s and 11.97 s for step C). Figures are from single runs on a 4-core, 8-thread AMD Ryzen 5 3450U laptop, so differences of about 1–2 s are noise.</p>
+
+<p>The loss values are the same across steps to the printed precision, apart from small differences in the 4th decimal caused by floating-point summation order. Accuracy differs only where the summation order changed (76.82% to 76.90%).</p>
+
+<h2>10. How to reproduce</h2>
+
+<pre><code>cd C:\Users\dell\Documents\Codex\2026-10-23\nfs
+mvn -B test
+mvn -B -q install -DskipTests
+
+cd projects\fashion-mnist
+java --add-modules jdk.incubator.vector ^
+  -cp "target\classes;..\..\target\classes" ^
+  FashionCNNApp 60000 2 128 10000 true 4
+
+rem arguments: trainLimit epochs batchSize testLimit compact threads</code></pre>
+
+<h2>11. Remaining opportunities</h2>
+
+<ul>
+  <li><b>Non-unit stride:</b> <code>Conv2D</code> still uses scalar loops for stride &gt; 1. Not needed by the current network.</li>
+  <li><b>Evaluation:</b> test evaluation runs single-threaded. It is about 1–3 s, so the benefit is small.</li>
+  <li><b>Allocation:</b> <code>Dense.forward</code> clones its input for the backward pass, and the flatten and unflatten helpers copy arrays. These are small compared with the convolution.</li>
+  <li><b>Batch-size effect:</b> batch 512 is not faster than batch 128 in this setup and gives lower accuracy at the same learning rate. Raising the learning rate or training for more epochs would be needed to use it.</li>
+  <li><b>Fusion:</b> the convolution, ReLU and pooling could be fused into one pass over each plane, which would remove two memory passes per layer.</li>
+</ul>
+
+</body>
+</html>

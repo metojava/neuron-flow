@@ -1,0 +1,186 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>03 · Backpropagation — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html">02 · Forward pass</a>
+      <a href="03-backprop.html" class="active">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses &amp; optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html">08 · Downloader &amp; loader</a>
+      <a href="09-keras-like.html">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html">10 · Evaluation &amp; confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html">13 · Run it</a>
+      <a href="14-full-walkthrough.html">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html">16 · Classical machine learning</a>
+      <a href="17-autograd.html">17 · Autograd</a>
+      <a href="18-transformers.html">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html">20 · GPT</a>
+      <a href="21-api-reference.html">21 · API reference</a>
+      <a href="performance.html">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Chapter 03</div>
+    <article>
+      <div class="eyebrow">03 · Backpropagation</div>
+      <h1>Gradients from the error backwards</h1>
+      <p class="lead">After the forward pass, the network knows how wrong it was. Backpropagation walks that error from the output layer back to the first hidden layer using the chain rule, producing one gradient per weight.</p>
+
+      <h2>3.1 The chain rule in one picture</h2>
+      <div class="flow">
+        <span>Loss <small>how wrong</small></span><b>→</b>
+        <span>∂L/∂output <small>error signal</small></span><b>→</b>
+        <span>× f′(z) <small>activation slope</small></span><b>→</b>
+        <span>δ <small>per neuron</small></span><b>→</b>
+        <span>× input <small>per weight</small></span>
+      </div>
+
+      <div class="formula">
+        Output layer: &nbsp; δ = (∂L/∂a) · f′(z)<br>
+        Hidden layer: &nbsp; δⱼ = ( Σᵢ δᵢ · wᵢⱼ ) · f′(zⱼ)<br>
+        Weight grad: &nbsp;&nbsp; ∂L/∂wⱼₖ = δⱼ · aₖ<br>
+        Bias grad: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ∂L/∂bⱼ = δⱼ
+      </div>
+
+      <h2>3.2 The method: <code>trainBatch</code></h2>
+      <pre><code>/**
+ * Trains on one mini-batch. Gradients are accumulated over every
+ * sample first, averaged, and only then handed to the optimizer.
+ *
+ * @param inputs  batch of examples, [batchSize][inputSize]
+ * @param targets batch of targets,  [batchSize][outputSize]
+ * @throws IllegalArgumentException if any dimension is inconsistent
+ */
+public void trainBatch(double[][] inputs, double[][] targets) {
+    validateDataset(inputs, targets);
+
+    int parameterCount = parameterCount();
+    double[] parameters = flattenParameters();
+    double[] gradients  = new double[parameterCount];
+
+    for (int sample = 0; sample &lt; inputs.length; sample++) {
+
+        // --- forward ---
+        double[] prediction = forwardPropagate(inputs[sample]);
+
+        if (targets[sample].length != prediction.length) {
+            throw new IllegalArgumentException(
+                "Target dimension does not match output");
+        }
+
+        // --- 1. output-layer gradients ---
+        double[] outputGradient =
+            lossFunction.gradient(prediction, targets[sample]);
+
+        Layer outputLayer = layers[layers.length - 1];
+
+        for (int i = 0; i &lt; outputLayer.neurons.length; i++) {
+            Neuron neuron = outputLayer.neurons[i];
+            neuron.gradient = outputGradient[i]
+                * activations[layers.length - 1]
+                    .derivativeFromOutput(neuron.value);
+        }
+
+        // --- 2. hidden layers, walking backwards ---
+        for (int l = layers.length - 2; l &gt; 0; l--) {
+            Layer current = layers[l];
+            Layer next    = layers[l + 1];
+
+            for (int i = 0; i &lt; current.neurons.length; i++) {
+                double sum = 0.0;
+
+                for (Neuron nextNeuron : next.neurons) {
+                    sum += nextNeuron.gradient
+                         * nextNeuron.weights[i];
+                }
+
+                Neuron neuron = current.neurons[i];
+                neuron.gradient = sum
+                    * activations[l].derivativeFromOutput(
+                        neuron.value);
+            }
+        }
+
+        // --- 3. parameter gradients, same order as flatten ---
+        int k = 0;
+
+        for (int l = 1; l &lt; layers.length; l++) {
+            Layer previous = layers[l - 1];
+
+            for (Neuron neuron : layers[l].neurons) {
+                for (int j = 0; j &lt; neuron.weights.length; j++) {
+                    gradients[k++] += neuron.gradient
+                                     * previous.neurons[j].value;
+                }
+                gradients[k++] += neuron.gradient; // bias
+            }
+        }
+    }
+
+    // Average over the batch, then update.
+    for (int i = 0; i &lt; gradients.length; i++) {
+        gradients[i] /= inputs.length;
+    }
+
+    optimizer.update(parameters, gradients);
+    unflattenParameters(parameters);
+}</code></pre>
+
+      <h3>Step by step</h3>
+      <ol>
+        <li><strong>Forward</strong> the sample so every neuron caches its activation.</li>
+        <li><strong>Output δ:</strong> multiply the loss gradient by the output activation's derivative — this is <code>∂L/∂z</code>.</li>
+        <li><strong>Hidden δ:</strong> for each hidden neuron, sum (next layer's δ × connecting weight), then multiply by its own derivative. The loop runs from the second-to-last layer down to layer 1 — the input layer is skipped because it has no weights.</li>
+        <li><strong>Parameter gradients:</strong> δ × upstream activation for weights, plain δ for biases. The order matches <code>flattenParameters()</code> exactly so indices line up.</li>
+        <li><strong>Average</strong> the accumulated gradients over the batch size.</li>
+        <li><strong>Update:</strong> give the flattened parameters and gradients to the optimizer, then write the new values back into the neurons.</li>
+      </ol>
+
+      <h3>Why the trick <code>derivativeFromOutput</code> works</h3>
+      <p>Most activation derivatives can be written using the <em>output</em> instead of the input:</p>
+      <ul>
+        <li>Sigmoid: <code>f′(z) = a(1−a)</code> where <code>a = σ(z)</code></li>
+        <li>Tanh: <code>f′(z) = 1 − a²</code></li>
+        <li>ReLU: <code>1 if a &gt; 0 else 0</code></li>
+      </ul>
+      <p>Since <code>neuron.value</code> already holds <code>a</code>, no second pass is needed.</p>
+
+      <h3>Helper methods used above</h3>
+      <table>
+        <tr><th>Method</th><th>Return</th><th>Logic</th></tr>
+        <tr><td><code>parameterCount()</code></td><td><code>int</code></td><td>Sums <code>weights.length + 1</code> (the +1 is the bias) over every neuron in layers 1..n.</td></tr>
+        <tr><td><code>flattenParameters()</code></td><td><code>double[]</code></td><td>Copies every weight and bias, layer by layer, neuron by neuron, into one long array.</td></tr>
+        <tr><td><code>unflattenParameters(p)</code></td><td><code>void</code></td><td>Writes the (updated) flat array back into the neurons in the same order.</td></tr>
+        <tr><td><code>validateDataset(x, y)</code></td><td><code>void</code></td><td>Checks row counts match and each row matches input/output sizes.</td></tr>
+      </table>
+
+      <div class="note"><strong>Averaging convention.</strong> Gradients are divided by the batch size <em>and</em> the loss gradient already divides by the output size. This keeps step magnitudes independent of batch and class count — useful when comparing runs.</div>
+
+      <div class="paging">
+        <a href="02-forward-pass.html">← 02 · Forward pass</a>
+        <a href="04-activations.html">04 · Activations →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

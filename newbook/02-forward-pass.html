@@ -1,0 +1,179 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>02 · Forward pass — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html" class="active">02 · Forward pass</a>
+      <a href="03-backprop.html">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses &amp; optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html">08 · Downloader &amp; loader</a>
+      <a href="09-keras-like.html">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html">10 · Evaluation &amp; confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html">13 · Run it</a>
+      <a href="14-full-walkthrough.html">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html">16 · Classical machine learning</a>
+      <a href="17-autograd.html">17 · Autograd</a>
+      <a href="18-transformers.html">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html">20 · GPT</a>
+      <a href="21-api-reference.html">21 · API reference</a>
+      <a href="performance.html">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Chapter 02</div>
+    <article>
+      <div class="eyebrow">02 · Forward pass</div>
+      <h1>How an input becomes a prediction</h1>
+      <p class="lead">The forward pass computes, layer by layer, <code>z = w·x + b</code> followed by <code>a = f(z)</code>. We read <code>forwardPropagate</code> and walk through the arithmetic by hand.</p>
+
+      <h2>2.1 The method</h2>
+      <pre><code>/**
+ * Runs one input vector through the whole network.
+ *
+ * Each neuron in layer l computes
+ *     z = bias + Σ (previous.value × weight)
+ *     neuron.value = activation[l](z)
+ * and the final layer's values are copied out as the result.
+ *
+ * @param inputs one example, length must equal layer-0 size
+ * @return       one output per output-layer neuron
+ * @throws IllegalArgumentException if the length is wrong or a value
+ *                                  is NaN/infinite
+ */
+public double[] forwardPropagate(double[] inputs) {
+    if (inputs == null ||
+        inputs.length != layers[0].neurons.length) {
+        throw new IllegalArgumentException(
+            "Input dimension does not match network");
+    }
+
+    // Step 1: copy the raw input into the input layer.
+    for (int i = 0; i &lt; inputs.length; i++) {
+        if (!Double.isFinite(inputs[i])) {
+            throw new IllegalArgumentException("Inputs must be finite");
+        }
+        layers[0].neurons[i].value = inputs[i];
+    }
+
+    // Step 2: every later layer reads the previous layer's values.
+    for (int l = 1; l &lt; layers.length; l++) {
+        Layer previous = layers[l - 1];
+        Layer current  = layers[l];
+
+        for (Neuron neuron : current.neurons) {
+            double sum = neuron.bias;
+
+            for (int j = 0; j &lt; previous.neurons.length; j++) {
+                sum += previous.neurons[j].value
+                     * neuron.weights[j];
+            }
+
+            neuron.value = activations[l].activate(sum);
+        }
+    }
+
+    // Step 3: copy the output layer's activations into an array.
+    Layer output = layers[layers.length - 1];
+    double[] result = new double[output.neurons.length];
+
+    for (int i = 0; i &lt; result.length; i++) {
+        result[i] = output.neurons[i].value;
+    }
+
+    return result;
+}
+
+/**
+ * Alias for {@link #forwardPropagate(double[])}.
+ *
+ * @param inputs one example
+ * @return network outputs
+ */
+public double[] predict(double[] inputs) {
+    return forwardPropagate(inputs);
+}</code></pre>
+
+      <h3>Parameters in plain language</h3>
+      <table>
+        <tr><th>Parameter</th><th>Shape</th><th>Role</th></tr>
+        <tr><td><code>inputs</code></td><td><code>[inputSize]</code></td><td>One sample — 784 pixel values in [0,1] for Fashion MNIST.</td></tr>
+        <tr><td>return <code>result</code></td><td><code>[outputSize]</code></td><td>One activation per class — 10 numbers for the classifier.</td></tr>
+      </table>
+
+      <h2>2.2 Worked example: 2 → 1 net</h2>
+      <p>Take one neuron with weights <code>w = [0.5, -0.3]</code>, bias <code>b = 0.1</code>, tanh activation, and input <code>x = [1.0, 2.0]</code>.</p>
+
+      <div class="formula">
+        z = 0.1 + (1.0 × 0.5) + (2.0 × −0.3)<br>
+        z = 0.1 + 0.5 − 0.6 = 0.0<br>
+        a = tanh(0.0) = 0.0
+      </div>
+
+      <p>The loop in the code performs exactly this: initialize <code>sum</code> with the bias, add each <code>previous.value × weight</code>, then apply the activation.</p>
+
+      <h2>2.3 What happens behind the scenes</h2>
+      <div class="flow">
+        <span>Input <small>a⁰ = x</small></span><b>→</b>
+        <span>z¹ = W¹a⁰ + b¹</span><b>→</b>
+        <span>a¹ = f¹(z¹)</span><b>→</b>
+        <span>z² = W²a¹ + b²</span><b>→</b>
+        <span>output <small>a²</small></span>
+      </div>
+
+      <p>Notice that <code>neuron.value</code> is overwritten on every pass. That's intentional: forward propagation keeps only the most recent activations, which are precisely the values backpropagation needs (via the derivative-from-output trick in <code>ActivationFunction</code>).</p>
+
+      <div class="note"><strong>Input layer has no activation.</strong> The code starts the loop at <code>l = 1</code>, so <code>activations[0]</code> is never applied to raw inputs. Using <code>linear()</code> for index 0 is a convention that keeps the arrays aligned.</div>
+
+      <h2>2.4 Complete runnable example</h2>
+      <pre><code>import java.util.Random;
+
+public class ForwardDemo {
+    public static void main(String[] args) {
+        // Network: 2 inputs, 1 hidden tanh neuron, 1 sigmoid output.
+        NeuralNetwork net = new NeuralNetwork(
+            new int[]{2, 1, 1},
+            new ActivationFunction[]{
+                ActivationFunction.linear(),
+                ActivationFunction.tanh(),
+                ActivationFunction.sigmoid()
+            },
+            LossFunction.meanSquaredError(),
+            new SGD(0.1),
+            42L
+        );
+
+        double[] output = net.predict(new double[]{1.0, 2.0});
+
+        System.out.println("Output: " + output[0]);
+        // A value in (0, 1) because the last activation is sigmoid.
+    }
+}</code></pre>
+
+      <div class="paging">
+        <a href="01-foundations.html">← 01 · Foundations</a>
+        <a href="03-backprop.html">03 · Backpropagation →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

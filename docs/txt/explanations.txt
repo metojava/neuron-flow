@@ -1,0 +1,1199 @@
+# Building a Deep Learning API in Java: A Complete Tutorial
+
+This tutorial explains how your Java deep learning framework works, why its classes are designed the way they are, how the mathematics maps to the code, and how to use the API to train a neural network on MNIST.
+
+We'll start from your original `Neuron`, `Layer`, and `NeuralNetwork` classes and build up to the expanded framework with activation functions, loss functions, optimizers, a training engine, and an MNIST pipeline.
+
+The goal isn't just to show you how to run the code. It's to help you understand the principles well enough to implement new layers, optimization algorithms, and neural network architectures yourself.
+
+## 1. What are we building?
+
+Your framework is a small neural network engine written from scratch in Java. It performs the main operations required to train a neural network:
+
+- Forward propagation: Calculate a prediction from an input.
+- Loss calculation: Measure how far the prediction is from the expected answer.
+- Backpropagation: Calculate how each parameter contributed to the error.
+- Optimization: Adjust weights and biases to reduce the error.
+- Training: Repeat these operations over many examples and epochs.
+- Inference: Use the trained network to make predictions on new data.
+
+These operations are the foundation of many deep learning libraries, including PyTorch and TensorFlow.
+
+### The overall architecture
+
+Data layer
+
+MNISTDownloader · MNISTLoader
+
+Model layer
+
+Neuron · Layer · NeuralNetwork
+
+Mathematical components
+
+ActivationFunction · LossFunction
+
+Training engine
+
+Trainer · Optimizer · SGD · Adam
+
+Application layer
+
+Main · MNISTRunner
+
+This is a conceptual view of the responsibilities. In the current implementation, `NeuralNetwork` still coordinates several mathematical operations itself; a future refactor could delegate more of those operations to individual layer objects.
+
+## 2. The mathematics behind a neuron
+
+Before examining the Java classes, let's understand what a neuron calculates.
+
+A neuron receives several input values. It multiplies each input by a weight, adds the results, adds a bias, and passes the result through an activation function.
+
+For a neuron with $n$ inputs:
+
+$$
+z = \sum_{i=1}^{n} w_i x_i + b
+$$
+
+Then:
+
+$$
+a = f(z)
+$$
+
+Where:
+
+- $x_i$ is an input value.
+- $w_i$ is a learnable weight.
+- $b$ is a learnable bias.
+- $z$ is the weighted sum before activation.
+- $f$ is an activation function.
+- $a$ is the neuron's output.
+
+For example, suppose a neuron receives two inputs:
+
+$$
+x_1=0.5,\qquad x_2=0.8
+$$
+
+Its parameters are:
+
+$$
+w_1=0.4,\qquad w_2=-0.2,\qquad b=0.1
+$$
+
+The weighted sum is:
+
+$$
+z=(0.5)(0.4)+(0.8)(-0.2)+0.1=0.14
+$$
+
+With sigmoid activation:
+
+$$
+a=\frac{1}{1+e^{-0.14}}\approx0.535
+$$
+
+The neuron outputs approximately `0.535`.
+
+During training, the network learns weights and biases that produce more accurate outputs.
+
+## 3. Understanding `Neuron.java`
+
+Your original implementation:
+
+java
+```
+import java.util.Random;
+
+public class Neuron {
+    public double[] weights;
+    public double bias;
+    public double value;
+    public double gradient;
+
+    public Neuron(int numInputs, Random rand) {
+        this.weights = new double[numInputs];
+
+        for (int i = 0; i < numInputs; i++) {
+            this.weights[i] = rand.nextDouble() * 2 - 1;
+        }
+
+        this.bias = rand.nextDouble() * 2 - 1;
+    }
+}
+```
+
+Let's examine every field and method.
+
+### 3.1 The `weights` field
+
+java
+```
+public double[] weights;
+```
+
+A weight represents the strength and direction of a connection from an input neuron to this neuron.
+
+If a neuron has four incoming connections, it needs four weights:
+
+java
+```
+weights = new double[] {0.2, -0.5, 0.7, 0.1};
+```
+
+The weighted contribution of the second input is:
+
+java
+```
+previousNeuronValue * weights[1]
+```
+
+A positive weight means a positive input contributes positively to the weighted sum. A negative weight contributes negatively.
+
+Weights are parameters learned during training.
+
+### 3.2 The `bias` field
+
+java
+```
+public double bias;
+```
+
+The bias is an additional learnable parameter independent of the input values.
+
+Without a bias, a neuron's weighted sum would always be zero when all inputs were zero. A bias lets the neuron shift its activation threshold.
+
+For example:
+
+$$
+z=w_1x_1+w_2x_2+b
+$$
+
+Even if both inputs are zero, the neuron can produce a nonzero result because of $b$.
+
+### 3.3 The `value` field
+
+java
+```
+public double value;
+```
+
+This stores the neuron's most recent output after activation.
+
+During forward propagation:
+
+java
+```
+neuron.value = activation.activate(weightedSum);
+```
+
+The next layer uses that value as one of its inputs.
+
+The value is temporary computational state, not a learned parameter. It changes every time you process a new input.
+
+### 3.4 The `gradient` field
+
+java
+```
+public double gradient;
+```
+
+This stores the local error signal calculated during backpropagation.
+
+For a sigmoid output neuron with mean squared error, one form of the gradient signal is:
+
+$$
+\delta=(a-y)a(1-a)
+$$
+
+Here, $a$ is the prediction and $y$ is the target.
+
+The original implementation uses the opposite sign convention, `target - output`, because it adds updates to the weights. The expanded implementation instead uses the conventional loss gradient and subtracts it during optimization.
+
+Both conventions can work when used consistently.
+
+### 3.5 The constructor
+
+java
+```
+public Neuron(int numInputs, Random rand)
+```
+
+This constructor creates the number of weights required by the incoming connections and initializes them randomly.
+
+Why random initialization? If all neurons started with identical weights, neurons in the same layer would tend to learn the same features. Random weights break that symmetry.
+
+The original uniform initialization between -1 and 1 is easy to understand, but for deeper networks it can make training unstable. The expanded network uses Xavier-style initialization; for ReLU networks, He initialization is generally more appropriate.
+
+## 4. Understanding `Layer.java`
+
+Your layer class groups neurons together.
+
+java
+```
+import java.util.Random;
+
+public class Layer {
+    public Neuron[] neurons;
+
+    public Layer(int numNeurons, int numInputsPerNeuron, Random rand) {
+        this.neurons = new Neuron[numNeurons];
+
+        for (int i = 0; i < numNeurons; i++) {
+            this.neurons[i] = new Neuron(numInputsPerNeuron, rand);
+        }
+    }
+}
+```
+
+The important distinction is between the number of neurons in a layer and the number of incoming connections per neuron.
+
+For example:
+
+java
+```
+Layer hidden = new Layer(4, 3, new Random(42));
+```
+
+This creates four neurons, each with three weights.
+
+Example: a dense layer with three inputs and four neurons
+
+Each of the four neurons receives all three inputs, so the layer has $3\times4=12$ weights and four biases.
+
+The number of parameters in a dense layer is:
+
+$$
+P=n_{\text{in}}n_{\text{out}}+n_{\text{out}}
+$$
+
+For the example above:
+
+$$
+P=3(4)+4=16
+$$
+
+The layer contains 12 weights and four biases.
+
+### Why have a separate `Layer` class?
+
+This is an example of composition: a layer contains neurons rather than inheriting from a neuron.
+
+Composition represents the domain naturally. A network contains layers, and each layer contains neurons.
+
+It also makes the architecture easy to describe using a topology such as:
+
+java
+```
+int[] topology = {2, 4, 1};
+```
+
+This means two input values, four hidden neurons, and one output neuron.
+
+## 5. Understanding `NeuralNetwork.java`
+
+This is the central component of the original API.
+
+It stores the layers, coordinates forward propagation, calculates gradients, and updates the parameters.
+
+### 5.1 Constructing the topology
+
+The original constructor accepts an integer array:
+
+java
+```
+NeuralNetwork nn =
+    new NeuralNetwork(new int[]{2, 4, 1}, 0.5);
+```
+
+The topology describes the size of each layer.
+
+| Index | Layer | Number of neurons |
+| --- | --- | --- |
+| 0 | Input | 2 |
+| 1 | Hidden | 4 |
+| 2 | Output | 1 |
+
+The first layer does not require incoming weights in a conventional feedforward network because it simply holds the input values.
+
+The subsequent layers receive weights from the previous layer.
+
+### 5.2 Forward propagation
+
+Forward propagation calculates the output from left to right through the network.
+
+For every trainable layer, the computation is:
+
+1. Start with the neuron's bias.
+2. Multiply each previous neuron value by its corresponding weight.
+3. Add all the contributions.
+4. Apply the activation function.
+5. Store the result in `neuron.value`.
+
+The core calculation from your original code is:
+
+java
+```
+double activationSum = neuron.bias;
+
+for (int p = 0; p < prevLayer.neurons.length; p++) {
+    activationSum +=
+        prevLayer.neurons[p].value * neuron.weights[p];
+}
+
+neuron.value = sigmoid(activationSum);
+```
+
+This is the implementation of:
+
+$$
+a^{(l)}=f\left(W^{(l)}a^{(l-1)}+b^{(l)}\right)
+$$
+
+The superscript $l$ represents the layer index.
+
+For a network with 784 inputs, 128 hidden neurons, 64 hidden neurons, and 10 outputs, forward propagation performs these transformations:
+
+$$
+784\rightarrow128\rightarrow64\rightarrow10
+$$
+
+The output is an array of ten numbers, one for each digit class in the MNIST example.
+
+### 5.3 Why store the intermediate values?
+
+The network stores each neuron's activation in `value` rather than recomputing the whole network during backpropagation.
+
+Backpropagation needs the intermediate activations to calculate gradients. Caching them saves computation.
+
+There is a trade-off: this state is overwritten on every forward pass. That is fine for sequential training, but it means the current implementation is not designed for concurrent calls to `predict()` on the same network without further changes.
+
+### 5.4 Backpropagation
+
+Backpropagation calculates how the loss changes with respect to each parameter using the chain rule of calculus.
+
+For a parameter $\theta$, the quantity of interest is:
+
+$$
+\frac{\partial L}{\partial\theta}
+$$
+
+The gradient tells us how the loss would change for a small change in that parameter.
+
+For an output neuron using sigmoid activation and mean squared error, the original gradient signal is:
+
+$$
+\delta=(y-a) a(1-a)
+$$
+
+where $y$ is the target and $a$ is the predicted output.
+
+For a hidden neuron:
+
+$$
+\delta_i=f'(a_i)\sum_j w_{ji}\delta_j
+$$
+
+This expression combines the downstream gradients with the weights connecting the current neuron to the next layer.
+
+The original code implements the hidden-layer calculation with nested loops:
+
+java
+```
+double errorSum = 0;
+
+for (int j = 0; j < nextLayer.neurons.length; j++) {
+    errorSum += nextLayer.neurons[j].gradient
+              * nextLayer.neurons[j].weights[i];
+}
+
+neuron.gradient =
+    errorSum * sigmoidDerivative(neuron.value);
+```
+
+The network processes layers backwards because the gradient at a hidden neuron depends on gradients in the layer after it.
+
+### 5.5 Updating the parameters
+
+Once the gradients are known, gradient descent changes the weights and biases to reduce the loss.
+
+With the conventional gradient convention:
+
+$$
+w\leftarrow w-\eta\frac{\partial L}{\partial w}
+$$
+
+$$
+b\leftarrow b-\eta\frac{\partial L}{\partial b}
+$$
+
+Here, $\eta$ is the learning rate.
+
+The original code uses addition because its stored gradient has the opposite sign. The expanded implementation changes to subtraction so that optimizers such as SGD and Adam can share a common gradient convention.
+
+Important: all gradients for a training example or mini-batch must be computed using the same parameter values. Updating weights before completing backpropagation would change the quantities needed for later gradient calculations.
+
+## 6. Activation functions and the Strategy pattern
+
+The expanded API introduces:
+
+java
+```
+public interface ActivationFunction {
+    double activate(double x);
+
+    double derivativeFromOutput(double output);
+}
+```
+
+This interface defines two operations that every activation function must provide:
+
+- `activate(x)` calculates the output.
+- `derivativeFromOutput(output)` calculates the derivative needed during backpropagation.
+
+Why not hard-code sigmoid into `NeuralNetwork`?
+
+Because activation functions are interchangeable algorithms.
+
+For example:
+
+java
+```
+ActivationFunction.sigmoid()
+ActivationFunction.tanh()
+ActivationFunction.relu()
+ActivationFunction.leakyRelu(0.01)
+ActivationFunction.linear()
+```
+
+The network can use different activation functions in different layers without changing its forward-propagation algorithm.
+
+This is an example of the Strategy design pattern: an object delegates a specific behavior to another object that implements a common interface.
+
+### When should you use each activation?
+
+| Activation | Typical use |
+| --- | --- |
+| Sigmoid | Binary probability outputs |
+| Tanh | Hidden layers in some networks; outputs between -1 and 1 |
+| ReLU | Common default for dense hidden layers |
+| Leaky ReLU | Hidden layers where avoiding zero gradients for negative inputs is useful |
+| Linear | Regression outputs |
+
+For the MNIST MLP, ReLU hidden layers are a reasonable choice.
+
+One limitation in the current API is that softmax is not a scalar activation. It transforms an entire output vector, so it should be implemented as a vector-level operation rather than as an ordinary `ActivationFunction`.
+
+## 7. Loss functions: measuring prediction error
+
+An activation function determines a neuron's output. A loss function determines how wrong the network's prediction is.
+
+The expanded API defines:
+
+java
+```
+public interface LossFunction {
+    double loss(double[] predictions, double[] targets);
+
+    double[] gradient(
+        double[] predictions,
+        double[] targets
+    );
+}
+```
+
+This is another use of the Strategy pattern. The training engine does not need to know the internal formula for each loss function.
+
+### 7.1 Mean squared error
+
+The mean squared error (MSE) is:
+
+$$
+L=\frac{1}{n}\sum_{i=1}^{n}(p_i-y_i)^2
+$$
+
+where $p_i$ is a prediction and $y_i$ is its target.
+
+For example:
+
+- Prediction: `0.8`
+- Target: `1.0`
+- Squared error: `0.04`
+
+MSE is useful for regression and simple demonstrations such as XOR.
+
+### 7.2 Binary cross-entropy
+
+Binary cross-entropy measures the difference between a predicted binary probability and a target of zero or one.
+
+$$
+L=-\frac{1}{n}\sum_i
+\left[y_i\log p_i+(1-y_i)\log(1-p_i)\right]
+$$
+
+It is typically paired with sigmoid output for binary classification.
+
+### 7.3 Categorical cross-entropy
+
+For MNIST, there are ten mutually exclusive classes.
+
+A typical multiclass classifier calculates a logit $z_i$ for each digit and converts the logits into probabilities using softmax:
+
+$$
+p_i=\frac{e^{z_i}}{\sum_j e^{z_j}}
+$$
+
+The categorical cross-entropy for a single correct class $k$ is:
+
+$$
+L=-\log p_k
+$$
+
+If the network assigns a high probability to the correct digit, the loss is small. If it assigns a low probability, the loss is large.
+
+For a well-designed MNIST classifier, the preferred output combination is softmax plus categorical cross-entropy.
+
+The earlier `MNISTRunner` uses sigmoid outputs and MSE as a baseline, so it is not yet using the preferred multiclass loss. Also, the earlier `LossFunction` interface should be extended with a numerically stable vector-level softmax/cross-entropy implementation before treating the API as a complete multiclass framework.
+
+## 8. Optimizers: SGD and Adam
+
+The optimizer takes the calculated gradients and updates the model parameters.
+
+The expanded API defines a small interface:
+
+java
+```
+public interface Optimizer {
+    void update(double[] parameters, double[] gradients);
+}
+```
+
+This interface means an optimizer does not need to know whether a parameter represents a weight in a hidden layer or a bias in an output layer. It only needs a consistent array of parameters and their gradients.
+
+### 8.1 Stochastic gradient descent
+
+The basic SGD update is:
+
+$$
+\theta_{t+1}=\theta_t-\eta g_t
+$$
+
+Here:
+
+- $\theta_t$ is the current parameter.
+- $g_t$ is its gradient.
+- $\eta$ is the learning rate.
+
+SGD with momentum adds a velocity term that accumulates part of the previous update:
+
+$$
+v_t=\mu v_{t-1}+g_t
+$$
+
+$$
+\theta_{t+1}=\theta_t-\eta v_t
+$$
+
+Momentum can help smooth noisy updates and accelerate progress in consistent directions.
+
+### 8.2 Adam
+
+Adam tracks moving averages of gradients and squared gradients.
+
+$$
+m_t=\beta_1m_{t-1}+(1-\beta_1)g_t
+$$
+
+$$
+v_t=\beta_2v_{t-1}+(1-\beta_2)g_t^2
+$$
+
+It then applies bias correction and scales the update using the estimated second moment.
+
+Adam often works well as a starting optimizer for neural networks because it adapts update sizes across parameters.
+
+In the supplied implementation:
+
+java
+```
+new Adam(0.001)
+```
+
+sets the learning rate to `0.001` and uses common default values for the momentum coefficients.
+
+### 8.3 Why flatten parameters into arrays?
+
+The current implementation temporarily flattens the network's weights and biases into one array:
+
+java
+```
+double[] parameters = flattenParameters();
+double[] gradients = new double[parameterCount()];
+```
+
+This makes the optimizer generic. It can update every parameter without knowing the network's internal structure.
+
+After updating, the network copies the flat array back into the neurons:
+
+java
+```
+optimizer.update(parameters, gradients);
+unflattenParameters(parameters);
+```
+
+This is convenient for a small framework, although it introduces extra copying. A larger framework might expose parameter tensors directly or represent parameters as dedicated objects.
+
+There is another design detail to remember: the current optimizer instances maintain state, such as Adam's moving averages. That state must be preserved between batches and saved if training needs to resume exactly where it stopped.
+
+## 9. Mini-batch training and the role of `Trainer`
+
+The `Trainer` class stores configuration for training:
+
+java
+```
+Trainer trainer = new Trainer(
+    10_000,
+    256,
+    true,
+    42L
+);
+```
+
+The arguments mean:
+
+1. `10_000` — number of epochs.
+2. `256` — mini-batch size.
+3. `true` — shuffle the examples each epoch.
+4. `42L` — random seed for reproducible shuffling.
+
+An epoch is one complete pass through the training dataset.
+
+A mini-batch is a smaller group of examples processed together before an optimizer update.
+
+For a dataset of 60,000 MNIST training images and a batch size of 256, each epoch contains 235 batches: 234 full batches and one final batch of 96 examples.
+
+### What happens during a batch?
+
+1. Select a batch
+
+Images and corresponding labels
+
+2. Forward pass
+
+Calculate predictions and loss gradients
+
+3. Backpropagate
+
+Accumulate gradients across examples
+
+4. Average gradients
+
+Scale by the number of examples
+
+5. Optimizer update
+
+Update weights and biases once
+
+The key distinction from your original code is that mini-batch training calculates gradients for every example in the batch before changing any parameters.
+
+This is a form of batch gradient estimation. It is more computationally efficient than updating after every example in many workloads and typically produces less noisy gradients than single-example updates.
+
+### Why shuffle the data?
+
+Suppose all examples of digit `0` came first, followed by all examples of digit `1`. Without shuffling, early updates would be dominated by one class at a time.
+
+Shuffling reduces the risk of learning patterns tied to the order of the dataset.
+
+### An important implementation caveat
+
+The earlier `Trainer` is primarily a configuration object; `NeuralNetwork.fit()` currently performs the training loop. This is perfectly workable for a small API, but a more extensible architecture could move the loop into `Trainer` and let the model expose operations such as `forward`, `backward`, and `applyGradients`.
+
+That would make the training process easier to reuse for different model types.
+
+## 10. Understanding the MNIST data pipeline
+
+MNIST is a dataset of grayscale handwritten digit images. Each image has 28 rows and 28 columns, so each image contains 784 pixel values.
+
+The dataset has two parts:
+
+- Training set: 60,000 images.
+- Test set: 10,000 images.
+
+The training set is used to adjust the network's parameters. The test set is reserved for evaluating how well the trained network generalizes to unseen examples.
+
+### 10.1 `MNISTDownloader`
+
+The downloader retrieves four IDX files:
+
+| File | Contents |
+| --- | --- |
+| `train-images-idx3-ubyte` | Training images |
+| `train-labels-idx1-ubyte` | Training labels |
+| `t10k-images-idx3-ubyte` | Test images |
+| `t10k-labels-idx1-ubyte` | Test labels |
+
+The `.gz` versions are compressed files. The downloader decompresses them into the files the loader expects.
+
+The downloader uses Java's `HttpClient`, `GZIPInputStream`, and `Files` APIs, rather than a third-party dataset library.
+
+### 10.2 `MNISTLoader`
+
+The loader parses the binary IDX format. These files do not contain ordinary text or CSV records. Each starts with a header containing metadata, followed by the image pixels or labels.
+
+For images, the header contains:
+
+- Magic number identifying the file type.
+- Number of images.
+- Number of rows.
+- Number of columns.
+
+Each pixel is an unsigned byte between 0 and 255.
+
+The loader normalizes it using:
+
+java
+```
+images[i][p] = in.readUnsignedByte() / 255.0;
+```
+
+This transforms the pixel range from `[0, 255]` to `[0, 1]`, a common preprocessing step for neural networks.
+
+### 10.3 Why labels need one-hot encoding
+
+The label for an image might be the integer `7`. But the model has ten output neurons.
+
+One-hot encoding transforms that integer into a vector:
+
+text
+```
+[0, 0, 0, 0, 0, 0, 0, 1, 0, 0]
+```
+
+This vector indicates that class 7 is the correct answer.
+
+In Java:
+
+java
+```
+double[] target = new double[10];
+target[7] = 1.0;
+```
+
+One-hot encoding is a representation of the target, not a prediction. The model must still learn to assign a high score or probability to the correct output class.
+
+### 10.4 Why does `Dataset` exist inside `MNISTLoader`?
+
+The loader defines a nested `Dataset` class to group images and labels together.
+
+java
+```
+MNISTLoader.Dataset training =
+    MNISTLoader.loadTraining(directory);
+```
+
+This is a small example of a data transfer object: a structure that carries related data between components.
+
+The benefit is that you don't need to pass around unrelated image and label arrays everywhere. You can obtain the number of examples, an image, a label, or one-hot targets through the same object.
+
+One practical issue is memory consumption. Storing all 60,000 images as Java `double` arrays consumes hundreds of megabytes when array overhead is included. The current runner also materializes targets as `double[][]`. For larger datasets, consider storing pixel values as `byte` or `float` and converting each batch during training.
+
+## 11. Understanding `MNISTRunner`
+
+The runner is the application entry point for the MNIST experiment. It wires the components together, much like an application that uses a library.
+
+The general sequence is:
+
+java
+```
+MNISTDownloader.download(dataDirectory);
+
+MNISTLoader.Dataset training =
+    MNISTLoader.loadTraining(dataDirectory);
+
+MNISTLoader.Dataset testing =
+    MNISTLoader.loadTest(dataDirectory);
+```
+
+The first line ensures the data is available. The next two load the training and test sets.
+
+Then the runner constructs the network:
+
+java
+```
+int[] topology = {784, 128, 64, 10};
+```
+
+This architecture has:
+
+- 784 inputs.
+- 128 neurons in the first hidden layer.
+- 64 neurons in the second hidden layer.
+- 10 output neurons.
+
+The corresponding activation configuration is:
+
+java
+```
+ActivationFunction[] activations = {
+    ActivationFunction.linear(),
+    ActivationFunction.relu(),
+    ActivationFunction.relu(),
+    ActivationFunction.sigmoid()
+};
+```
+
+The first entry represents the input layer, whose values are not transformed. The hidden layers use ReLU. The output layer uses sigmoid in this baseline implementation.
+
+Next, the runner creates the model:
+
+java
+```
+NeuralNetwork network = new NeuralNetwork(
+    topology,
+    activations,
+    LossFunction.meanSquaredError(),
+    new Adam(0.001),
+    42L
+);
+```
+
+This is an example of dependency injection. Instead of making `NeuralNetwork` create its own optimizer and loss function internally, the caller supplies them.
+
+That design makes experimentation easier. You can change the optimizer or loss function without rewriting the network's forward pass.
+
+### The training loop
+
+The runner trains one epoch at a time:
+
+java
+```
+for (int epoch = 1; epoch <= EPOCHS; epoch++) {
+    Trainer trainer = new Trainer(
+        1,
+        BATCH_SIZE,
+        true,
+        SEED + epoch
+    );
+
+    network.fit(trainer, trainImages, trainTargets);
+}
+```
+
+Why use one epoch per call instead of passing all five epochs to `fit()`?
+
+Because the runner wants to report progress after each epoch. This lets you observe loss and test accuracy as training proceeds.
+
+The optimizer object is not recreated inside the loop; it belongs to the network. Therefore, Adam's internal moving averages continue across epochs.
+
+The training data is shuffled on every call. Because the seed changes by epoch, the permutations are reproducible for this sequence of calls.
+
+### Prediction
+
+After training, a prediction is made using:
+
+java
+```
+double[] output = network.predict(testImages[i]);
+```
+
+The current runner uses an `argmax` function:
+
+java
+```
+int predicted = argmax(output);
+```
+
+`argmax` returns the index of the largest output value.
+
+If the output is:
+
+text
+```
+[0.03, 0.04, 0.12, 0.05, 0.08,
+ 0.02, 0.01, 0.59, 0.03, 0.03]
+```
+
+the predicted digit is `7`.
+
+With sigmoid outputs, these numbers are not a normalized probability distribution across all ten classes. They are independent activation values, and `argmax` simply chooses the largest one. With a softmax output layer, the values would sum to one and could be interpreted as class probabilities.
+
+### Accuracy and the confusion matrix
+
+Accuracy is calculated as:
+
+$$
+\text{Accuracy}=
+\frac{\text{Number of correct predictions}}
+{\text{Total number of examples}}
+$$
+
+If 9,500 of 10,000 test images are classified correctly, accuracy is 95%.
+
+The confusion matrix provides more detail. Its rows represent the true digits and its columns represent the predicted digits. The diagonal entries are correct classifications; off-diagonal entries show which digits the model confuses.
+
+For example, a high count at row 4, column 9 means many actual 4s were classified as 9s.
+
+This is useful because overall accuracy alone doesn't show which classes the model struggles with.
+
+## 12. Design patterns used in the API
+
+Several software design principles are present in this small framework.
+
+### 1. Composition
+
+`NeuralNetwork` → `Layer` → `Neuron`
+
+Objects are built from other objects. A layer contains neurons, and a network contains layers. This models the architecture naturally.
+
+### 2. Strategy pattern
+
+`ActivationFunction`, `LossFunction`, `Optimizer`
+
+Interchangeable algorithms share an interface. You can change an optimizer without rewriting the model's mathematical operations.
+
+### 3. Dependency injection
+
+The configurable `NeuralNetwork` constructor
+
+The caller supplies the loss function, activations, and optimizer. Dependencies are explicit instead of being hard-coded.
+
+### 4. Separation of concerns
+
+Downloader, loader, model, optimizer, runner
+
+Each component has a distinct responsibility. Data parsing doesn't need to know how gradients work, and the optimizer doesn't need to know how MNIST files are encoded.
+
+### 5. Configuration object
+
+`Trainer`
+
+Training settings are grouped into one object instead of being scattered across many method arguments.
+
+### 6. Data transfer object
+
+`MNISTLoader.Dataset`
+
+Related data travels together through a clear API, reducing the chance of accidentally pairing images with the wrong labels.
+
+These patterns are not unique to deep learning. They are general object-oriented design techniques that make the framework easier to test, maintain, and extend.
+
+### SOLID principles
+
+The design also points toward several SOLID principles:
+
+- Single Responsibility: Each component should have one main reason to change.
+- Open/Closed: New activation functions and optimizers can be introduced through existing interfaces.
+- Dependency Inversion: High-level training code can depend on optimizer and loss interfaces instead of specific implementations.
+
+The current framework only partially achieves these principles. For example, `NeuralNetwork` still contains layer traversal, gradient computation, and parameter flattening. A more mature framework would give layers explicit forward/backward methods and represent parameters separately.
+
+## 13. Common problems and important limitations
+
+Before extending this framework, there are a few implementation details worth understanding.
+
+### Problem 1: Sigmoid on all output classes
+
+Ten independent sigmoid outputs are not equivalent to a ten-class softmax classifier.
+
+For multiclass MNIST, implement a vector-level softmax and categorical cross-entropy. A numerically stable softmax subtracts the largest logit before exponentiation:
+
+$$
+p_i=\frac{e^{z_i-m}}{\sum_j e^{z_j-m}},
+\qquad m=\max_j z_j
+$$
+
+This prevents unnecessary numerical overflow.
+
+With softmax and cross-entropy combined, the gradient with respect to each output logit simplifies to:
+
+$$
+\frac{\partial L}{\partial z_i}=p_i-y_i
+$$
+
+For one-hot targets, this is the predicted probability minus the target. A fused implementation also avoids numerical issues associated with computing the two operations separately.
+
+### Problem 2: Initialization
+
+The original neuron constructor initializes weights and biases uniformly between -1 and 1. This can make signals grow or shrink as they pass through deeper networks.
+
+Xavier initialization is often appropriate for tanh and sigmoid networks. He initialization is usually preferable for ReLU networks.
+
+For ReLU weights, He initialization commonly uses:
+
+$$
+w\sim\mathcal{N}\left(0,\frac{2}{n_{\text{in}}}\right)
+$$
+
+where $n_{\text{in}}$ is the number of incoming connections.
+
+### Problem 3: Public mutable fields
+
+The current `Neuron` exposes weights, biases, and gradients as public fields.
+
+This is convenient for a teaching project, but it allows any caller to modify parameters without validation. In a larger library, use private fields and controlled accessors or parameter objects.
+
+### Problem 4: No gradient verification yet
+
+Backpropagation code can contain subtle indexing or sign errors and still compile.
+
+A numerical gradient check compares an analytical gradient to a finite-difference approximation:
+
+$$
+g_{\text{numeric}}\approx
+\frac{L(\theta+\epsilon)-L(\theta-\epsilon)}
+{2\epsilon}
+$$
+
+This is one of the most valuable tests to add before implementing complex architectures.
+
+### Problem 5: No checkpointing
+
+Saving only weights is insufficient to resume Adam training exactly. You also need its first and second moments and timestep, plus the model configuration and any learning-rate scheduler state.
+
+A future `ModelIO` component should serialize model and optimizer state in a versioned format.
+
+### Problem 6: Memory and performance
+
+The current implementation uses Java `double` arrays and loops over individual neurons. That makes the code clear, but not especially fast.
+
+For larger networks, performance can be improved with matrix operations, efficient batch representations, primitive flat arrays, and parallelized computation where appropriate. CNNs and Transformers would also require new layer abstractions rather than simply adding more `Neuron` objects.
+
+## 14. Running the API with Maven
+
+Your Maven project should have this structure:
+
+text
+```
+nfs/
+├── pom.xml
+├── data/
+│   └── mnist/
+└── src/
+    ├── main/
+    │   └── java/
+    │       ├── Neuron.java
+    │       ├── Layer.java
+    │       ├── NeuralNetwork.java
+    │       ├── ActivationFunction.java
+    │       ├── LossFunction.java
+    │       ├── Optimizer.java
+    │       ├── SGD.java
+    │       ├── Adam.java
+    │       ├── Trainer.java
+    │       ├── MNISTDownloader.java
+    │       ├── MNISTLoader.java
+    │       ├── MNISTRunner.java
+    │       └── Main.java
+    └── test/
+        └── java/
+```
+
+All classes can remain in the default package for now, as in the supplied code.
+
+### Compile the project
+
+bash
+```
+mvn clean compile
+```
+
+This checks the Java source code and produces compiled `.class` files under `target/classes`.
+
+### Download MNIST
+
+bash
+```
+mvn exec:java -Dexec.mainClass=MNISTDownloader
+```
+
+The downloader creates `data/mnist` relative to the working directory.
+
+### Train the MNIST model
+
+bash
+```
+mvn exec:java -Dexec.mainClass=MNISTRunner -Dexec.args="--quick"
+```
+
+For the full training set:
+
+bash
+```
+mvn exec:java -Dexec.mainClass=MNISTRunner
+```
+
+Remember that `--quick` limits the number of examples used for training, but the current loader still loads the full training dataset into memory before selecting the subset.
+
+### Run the original XOR example
+
+bash
+```
+mvn exec:java -Dexec.mainClass=Main
+```
+
+You can retain both entry points. Maven lets you select the class to run without changing the source code.
+
+## 15. How to extend the API yourself
+
+Once you understand the existing abstractions, you can start implementing new algorithms.
+
+For example, to introduce a new optimizer, implement `Optimizer`:
+
+java
+```
+public class MyOptimizer implements Optimizer {
+
+    @Override
+    public void update(double[] parameters, double[] gradients) {
+        for (int i = 0; i < parameters.length; i++) {
+            parameters[i] -= 0.001 * gradients[i];
+        }
+    }
+}
+```
+
+You could then inject it into the network:
+
+java
+```
+NeuralNetwork network = new NeuralNetwork(
+    topology,
+    activations,
+    LossFunction.meanSquaredError(),
+    new MyOptimizer(),
+    42L
+);
+```
+
+This example is intentionally simple; it implements basic gradient descent with a fixed learning rate.
+
+The important point is that you don't have to modify `NeuralNetwork` to introduce a different optimizer as long as the new optimizer follows the same interface and update convention.
+
+The same principle applies to activation functions and loss functions.
+
+### Where to go next
+
+Stage 1: Understand the existing MLP
+
+Trace one example through `forwardPropagate()`, loss calculation, `trainBatch()`, and `Optimizer.update()`. Verify the gradient calculations numerically.
+
+Stage 2: Complete classification
+
+Implement stable softmax and categorical cross-entropy, then test MNIST accuracy and per-class performance.
+
+Stage 3: Improve the training engine
+
+Add validation data, early stopping, learning-rate schedules, gradient clipping, and checkpointing.
+
+Stage 4: Introduce advanced architectures
+
+Create a general layer interface with `forward()` and `backward()` methods. Then implement dropout, batch normalization, convolution, pooling, recurrent layers, and attention.
+
+## Final perspective
+
+Your project is more than a handwritten-digit classifier. It is an opportunity to learn how neural network frameworks are designed internally.
+
+The mathematical foundation is the combination of forward computation, differentiation through the computational graph, and parameter optimization. The software engineering foundation is the separation of those responsibilities into reusable components.
+
+One final distinction is important: the code discussed here is an educational framework and a starting point, not yet a fully tested, production-ready deep learning library. The most valuable next step is to add gradient-checking tests and implement softmax with categorical cross-entropy before relying on MNIST results. Once those are verified, you will have a much stronger foundation for adding more advanced neural network architectures.

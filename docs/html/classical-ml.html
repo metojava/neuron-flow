@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Classical machine learning · NFS reader</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<a class="brand" href="index.html"><span>NFS / READER</span>Deep learning notes</a>
+<nav aria-label="Documents">
+<a href="index.html">Contents</a>
+<a href="first.html">Original Java</a>
+<a href="docs.html">Implementation notes</a>
+<a href="explanations.html">Complete tutorial</a>
+<a href="classical-ml.html" aria-current="page">Classical ML</a>
+</nav>
+</header>
+<div class="page">
+<aside>
+<div class="aside-title">On this page</div>
+<nav aria-label="Page contents">
+<a class="level2" href="#why">Why a second API?</a>
+<a class="level2" href="#dataframe">DataFrame and Vector</a>
+<a class="level2" href="#preprocessing">Preprocessing</a>
+<a class="level2" href="#splitting">Splitting and metrics</a>
+<a class="level2" href="#models">Models</a>
+<a class="level2" href="#pipeline">End-to-end pipeline</a>
+<a class="level2" href="#regression">Regression and clustering</a>
+<a class="level2" href="#limits">Status and limits</a>
+</nav>
+</aside>
+<main>
+<div class="eyebrow">CURRENT API / ml</div>
+<h1>Classical machine learning</h1>
+<div class="warning"><strong>About this page.</strong> Unlike the three historical documents in this reader, this page describes the <em>current</em> <code>ml</code> package. It is a short reference; the full chapter with derivations, parameter tables and exercises is <a href="../../newbook/16-classical-ml.html">newbook chapter 16</a>.</div>
+<p class="lead">The neural-network stack works on <code>float[]</code> and <code>float[][]</code>. The <code>ml</code> package works on named, typed columns: mixed numeric and categorical features, missing values, train/test splits, linear models, trees, kernels and clustering. It borrows scikit-learn's vocabulary &mdash; <em>estimator</em>, <em>transformer</em>, <em>pipeline</em> &mdash; without hiding the math.</p>
+
+<h2 id="why">Why a second API?</h2>
+<p>Tabular data has different requirements. A spreadsheet column may be numeric or categorical, may be missing, and may have a scale wildly different from its neighbour. A linear model or an SVM cannot absorb raw strings or features measured in thousands, while a neural network can. The <code>ml</code> package therefore makes preprocessing a first-class object and validates schemas instead of silently reshaping arrays.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Package</th><th>Data type</th><th>Best for</th><th>Entry point</th></tr>
+<tr><td><code>layers</code></td><td><code>float[]</code>, <code>float[][]</code></td><td>Images, dense and convolutional networks</td><td><code>NeuralNetwork</code></td></tr>
+<tr><td><code>autograd</code>, <code>transformers</code></td><td><code>float</code> tensors</td><td>Sequence models and custom graphs</td><td><code>Tensor</code>, <code>Ops</code></td></tr>
+<tr><td><code>ml</code></td><td><code>double</code> columns</td><td>Tabular regression, classification, clustering</td><td><code>DataFrame</code>, <code>Pipeline</code></td></tr>
+<tr><td><code>data</code></td><td><code>float[][]</code></td><td>CSV, Parquet and IDX loading, folds, scaling</td><td>loaders and splitters</td></tr>
+</table>
+</div>
+<p>The two numeric worlds are deliberate: classical models use <code>double</code> for numerically sensitive linear algebra, and the neural stack uses <code>float</code> for SIMD throughput. Convert at the boundary with <code>DataFrame.toDoubleMatrix()</code> and your own float loop. The packages do not depend on each other.</p>
+
+<h2 id="dataframe">DataFrame and Vector</h2>
+<p><code>ml.DataFrame</code> is an immutable, column-oriented table. Every column is either <code>NUMERIC</code> (a <code>double[]</code>, with <code>Double.NaN</code> marking missing values) or <code>CATEGORICAL</code> (a <code>String[]</code>, with <code>null</code> marking missing values). Accessors return defensive copies, so a frame can be shared across pipeline stages without aliasing bugs.</p>
+<pre class="code"><code>DataFrame raw = DataFrame.builder(4)
+        .addNumeric("age",    new double[]{34, 51, Double.NaN, 28})
+        .addNumeric("income", new double[]{62_000, 91_000, 47_000, Double.NaN})
+        .addCategorical("city", new String[]{"Paris", "Berlin", null, "Paris"})
+        .addCategorical("plan", new String[]{"premium", "basic", "premium", null})
+        .build();
+
+int rows = raw.rows();          // 4
+int columns = raw.columns();    // 4
+double age = raw.getDouble(0, 0);
+String city = raw.getString(0, 2);
+double[] ages = raw.numericColumn(0);
+int cityIndex = raw.columnIndex("city");</code></pre>
+<p><code>ml.Vector</code> is the matching immutable target container. Labels are <code>double</code>, so <code>0/1</code>, <code>-1/+1</code> and arbitrary class ids all work. Useful methods include <code>get</code>, <code>take</code>, <code>toArray</code>, <code>count</code>, <code>uniqueSorted</code>, <code>mean</code> and <code>requireFinite</code>.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Method</th><th>Purpose</th></tr>
+<tr><td><code>DataFrame.ofNumeric(names, rows)</code></td><td>Build a numeric-only frame from a row-major matrix.</td></tr>
+<tr><td><code>DataFrame.ofCategorical(names, rows)</code></td><td>Build a categorical-only frame.</td></tr>
+<tr><td><code>DataFrame.builder(rows)</code></td><td>Build a mixed frame one column at a time.</td></tr>
+<tr><td><code>select(int...)</code>, <code>takeRows(int[])</code></td><td>Select columns or rows while preserving types.</td></tr>
+<tr><td><code>appendNumericColumn(name, values)</code></td><td>Add an engineered feature.</td></tr>
+<tr><td><code>toDoubleMatrix()</code></td><td>Row-major matrix; fails if any column is categorical.</td></tr>
+<tr><td><code>allNumeric()</code></td><td>True when the frame can feed a model directly.</td></tr>
+</table>
+</div>
+
+<h2 id="preprocessing">Preprocessing</h2>
+<p>Every transformer implements the same contract: <code>fit</code> learns parameters, <code>transform</code> applies them (including to unseen data), <code>fitTransform</code> does both, and <code>isFitted</code> reports state. Calling <code>transform</code> before <code>fit</code> throws <code>IllegalStateException</code>.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Class</th><th>Learns</th><th>Notes</th></tr>
+<tr><td><code>SimpleImputer</code></td><td>Per-column mean, median or most frequent value</td><td><code>Strategy.MEAN</code>, <code>MEDIAN</code>, <code>MOST_FREQUENT</code>; categories use the mode.</td></tr>
+<tr><td><code>OneHotEncoder</code></td><td>Sorted category dictionaries</td><td><code>dropFirst</code> avoids collinearity; unknown values throw (<code>ERROR</code>) or become all zeros (<code>IGNORE</code>).</td></tr>
+<tr><td><code>StandardScaler</code></td><td>Mean and population standard deviation</td><td>Constant columns keep scale 1.</td></tr>
+<tr><td><code>MinMaxScaler</code></td><td>Column minimum and maximum</td><td>Maps to a configurable range, default <code>[0, 1]</code>.</td></tr>
+<tr><td><code>Pipeline</code></td><td>Fits each stage on the output of the previous one</td><td><code>Pipeline.of(...)</code> or <code>then(...)</code>; prevents leakage such as scaling before imputation.</td></tr>
+</table>
+</div>
+
+<h2 id="splitting">Splitting and metrics</h2>
+<pre class="code"><code>DatasetSplit.Split split = DatasetSplit.split(raw, labels, 0.25, 42L);
+DataFrame train = split.train();
+DataFrame test  = split.test();
+Vector yTrain   = split.yTrain();
+Vector yTest    = split.yTest();
+
+double accuracy = Metrics.accuracy(yTest, predictions);
+double mse      = Metrics.meanSquaredError(yTest, predictions);
+double r2       = Metrics.r2Score(yTest, predictions);</code></pre>
+<p>The split is a deterministic shuffle for a given seed. It keeps rows intact and makes no attempt to stratify; for imbalanced labels, split by class yourself or use the fold helpers in <code>data.cv</code> on the neural-network side.</p>
+
+<h2 id="models">Models</h2>
+<p>Supervised models implement <code>fit(DataFrame, Vector)</code>, <code>predict</code>, <code>predictProbabilities</code> and <code>score</code>. Classifiers also expose <code>classes()</code>. Regressors return a single probability column equal to the point prediction.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Model</th><th>Task</th><th>Key configuration</th></tr>
+<tr><td><code>LinearRegression</code></td><td>Regression</td><td>Learning rate, epochs, L2 penalty, tolerance, batch size, intercept.</td></tr>
+<tr><td><code>LogisticRegression</code></td><td>Binary and multiclass classification</td><td>Shuffled mini-batch SGD (default batch 32); one sigmoid model per class; L2 penalty.</td></tr>
+<tr><td><code>DecisionTree</code></td><td>Classification</td><td><code>Criterion.GINI</code> or <code>ENTROPY</code>, depth, minimum samples, random feature subset, seed.</td></tr>
+<tr><td><code>RandomForest</code></td><td>Classification</td><td>Number of trees, per-tree depth and feature sampling, seed; exposes feature importances.</td></tr>
+<tr><td><code>SVM</code></td><td>Binary classification</td><td>Linear or RBF kernel, <code>c</code>, tolerance, maximum passes; one-vs-rest for multiclass.</td></tr>
+<tr><td><code>KMeans</code></td><td>Clustering</td><td><code>k</code>, iterations, tolerance, restarts, seed; exposes centres and inertia.</td></tr>
+</table>
+</div>
+<p>Kernels live in <code>ml.kernel</code>: <code>Kernel.linear()</code> and <code>RbfKernel.withDefaultGamma(int featureCount)</code>. Models never standardise implicitly; put a scaler in the pipeline.</p>
+
+<h2 id="pipeline">End-to-end pipeline</h2>
+<pre class="code"><code>DataFrame raw = DataFrame.builder(rows)
+        .addNumeric("age", age)
+        .addNumeric("income", income)
+        .addNumeric("score", score)
+        .addCategorical("city", city)
+        .addCategorical("plan", plan)
+        .build();
+Vector labels = Vector.of(purchased);
+
+DatasetSplit.Split split = DatasetSplit.split(raw, labels, 0.25, 42L);
+
+Pipeline pipeline = Pipeline.of(
+        new SimpleImputer(SimpleImputer.Strategy.MEAN),
+        new OneHotEncoder(),
+        new StandardScaler());
+DataFrame train = pipeline.fitTransform(split.train());
+DataFrame test  = pipeline.transform(split.test());
+
+LogisticRegression model = new LogisticRegression(0.2, 3_000, 0.0, 1e-10, true)
+        .fit(train, split.yTrain());
+double accuracy = Metrics.accuracy(split.yTest(), model.predict(test));
+double[][] probabilities = model.predictProbabilities(test);</code></pre>
+<p>Fit the pipeline on training rows only, then transform the test rows with <code>pipeline.transform</code>. Fitting on the full frame before splitting leaks test statistics into training and inflates the score.</p>
+
+<h2 id="regression">Regression and clustering</h2>
+<pre class="code"><code>DataFrame houses = DataFrame.ofNumeric(new String[]{"area", "bedrooms"}, features);
+Vector prices = Vector.of(pricesArray);
+DatasetSplit.Split split = DatasetSplit.split(houses, prices, 0.25, 42L);
+
+Pipeline pipeline = Pipeline.of(new StandardScaler());
+DataFrame train = pipeline.fitTransform(split.train());
+DataFrame test  = pipeline.transform(split.test());
+
+LinearRegression regression = new LinearRegression(0.1, 5_000, 0.0, 1e-12, true)
+        .fit(train, split.yTrain());
+double rmse = Math.sqrt(Metrics.meanSquaredError(split.yTest(), regression.predict(test)));
+
+KMeans kmeans = new KMeans(3, 300, 1e-6, 10, 42L);
+int[] labels = kmeans.fitPredict(pipeline.transform(houses));
+double[][] centres = kmeans.clusterCenters();
+double inertia = kmeans.inertia();</code></pre>
+<p>Run the bundled demonstration with <code>java -cp target/classes examples.ClassicalMlDemo</code> (add <code>--add-modules jdk.incubator.vector</code> when running outside Maven). It builds synthetic mixed-type data, then reports roughly 0.95 logistic, 0.93 SVM, 0.85 tree and 0.94 forest accuracy on the held-out split, an R&sup2; of about 0.89 for house prices, and three recovered k-means clusters.</p>
+
+<h2 id="limits">Status and limits</h2>
+<ul>
+<li>The package is binary/multiclass classification, regression and k-means only. There is no PCA, no feature selection, no gradient-boosted trees and no model persistence.</li>
+<li>Logistic and linear regression use shuffled mini-batch SGD (default batch 32), not coordinate descent or L-BFGS. Convergence is controlled by epochs and tolerance, not by an exact solver.</li>
+<li>The tree is axis-aligned and uses exhaustive split search over observed values; it is not optimised for very wide frames.</li>
+<li>The SVM is SMO with a linear or RBF kernel; multiclass is one-vs-rest, so probabilities are not calibrated.</li>
+<li><code>DataFrame</code> is immutable and copies on access. This is safe but allocates; it is not intended for multi-gigabyte tables.</li>
+<li>There are unit tests for the data frame, preprocessing, supervised models and k-means under <code>src/test/java/ml</code>.</li>
+</ul>
+<p>Continue with <a href="../../newbook/16-classical-ml.html">chapter 16</a> for derivations and exercises, or <a href="../../newbook/21-api-reference.html">chapter 21</a> for the complete package map and the remaining documentation gaps.</p>
+<footer>Current API reference · <a href="index.html">Back to contents</a></footer>
+</main>
+</div>
+</body>
+</html>

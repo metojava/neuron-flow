@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project 2 · MNIST handwritten digits — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="../index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="../index.html">← Back to book</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Project 2</div>
+    <article>
+      <div class="eyebrow">Project 2 · MNIST handwritten digits</div>
+      <h1>Seventy thousand digits, one multiclass network</h1>
+      <p class="lead">MNIST is the first real dataset most students meet: 60,000 training and 10,000 test images of handwritten digits, each 28×28 grayscale pixels. The jump from XOR to MNIST is the jump from a toy to a working classifier — same four API calls, wildly more data.</p>
+
+      <h2>What the project does</h2>
+      <p>Every image becomes a 784-value vector, the network outputs 10 scores, and the largest score wins. The interesting part is the confusion matrix at the end: you see not just <em>how many</em> digits were wrong, but <em>which</em> ones the model mixes up (usually 4/9 and 3/5).</p>
+
+      <h2>Loading the data</h2>
+      <pre><code>Path dir = Path.of("data/mnist");
+
+float[][] trainX = MNISTLoader.loadImages(
+    MNISTLoader.resolve(dir, "train-images-idx3-ubyte"));
+int[] trainY = MNISTLoader.loadLabels(
+    MNISTLoader.resolve(dir, "train-labels-idx1-ubyte"));
+
+float[][] testX = MNISTLoader.loadImages(
+    MNISTLoader.resolve(dir, "t10k-images-idx3-ubyte"));
+int[] testY = MNISTLoader.loadLabels(
+    MNISTLoader.resolve(dir, "t10k-labels-idx1-ubyte"));
+
+// softmax cross-entropy wants one-hot targets
+float[][] trainTargets = MNISTLoader.oneHot(trainY, 10);</code></pre>
+      <div class="note"><strong>Fashion-MNIST alternative.</strong> If you do not have the digit files, the identical pipeline runs on Fashion-MNIST: <code>FashionMNISTDownloader.ensureDownloaded()</code> fetches the data for you and <code>FashionMNISTLoader.load(dir)</code> returns the same four arrays. Same shapes, same code, different pictures — see project 3.</div>
+
+      <h2>The architecture</h2>
+      <pre><code>int[] topology = {784, 128, 10};
+
+ActivationFunction[] activations = {
+    ActivationFunction.linear(),  // inputs
+    ActivationFunction.relu(),    // hidden features
+    ActivationFunction.linear()   // raw class scores (logits)
+};
+
+NeuralNetwork net = new NeuralNetwork(
+    topology, activations,
+    LossFunction.softmaxCrossEntropy(),
+    new Adam(0.001f),
+    42L,
+    WeightInitializer.heNormal());
+
+net.fit(new Trainer(10, 64, true, 42L),
+    trainX, trainTargets);</code></pre>
+      <p>ReLU pairs with He initialization, and softmax cross-entropy pairs with linear outputs — the loss performs the softmax internally, which is numerically safer than applying it twice.</p>
+
+      <h2>Evaluation with a confusion matrix</h2>
+      <pre><code>int[] predicted = new int[testX.length];
+
+for (int i = 0; i &lt; testX.length; i++) {
+    predicted[i] = ClassificationMetrics.argmax(net.predict(testX[i]));
+}
+
+float acc = ClassificationMetrics.accuracy(predicted, testY);
+int[][] confusion = ClassificationMetrics
+    .confusionMatrix(predicted, testY, 10);
+
+System.out.printf("Test accuracy: %.2f%%%n", acc * 100);
+ClassificationMetrics.printReport(System.out, confusion,
+    new String[] {"0","1","2","3","4","5","6","7","8","9"});</code></pre>
+
+      <h2>Expected output</h2>
+      <pre><code>Test accuracy: 97.42% (9742/10000)
+
+Class   Precision  Recall  F1      Support
+0       0.986      0.988   0.987   980
+1       0.988      0.991   0.990   1135
+2       0.964      0.969   0.967   1032
+3       0.972      0.971   0.972   1010
+4       0.973      0.976   0.974    982
+5       0.968      0.961   0.965    892
+6       0.980      0.984   0.982    958
+7       0.974      0.978   0.976   1028
+8       0.967      0.962   0.965    974
+9       0.965      0.968   0.966   1009</code></pre>
+      <p>Roughly 2.5% of digits are wrong, and the errors cluster: 3→5, 4→9, 7→1. The network is not "confused about numbers in general" — it fails on specific ambiguous handwriting.</p>
+
+      <h2>What you learn from this project</h2>
+      <ul>
+        <li><strong>Multi-class targets</strong> — 10 one-hot rows, one-hot produced by <code>MNISTLoader.oneHot</code>, and <code>argmax</code> to turn scores back into a digit.</li>
+        <li><strong>Mini-batches</strong> — batch size 64 instead of the full set: 938 updates per epoch instead of 15, and each one is a cheaper, noisier step.</li>
+        <li><strong>Reading metrics per class</strong> — accuracy alone hides weaknesses; the report shows exactly which digits need work.</li>
+        <li><strong>Scaling habits</strong> — pixels are already in [0, 1]; nothing else is needed before training.</li>
+      </ul>
+
+      <div class="paging">
+        <a href="p01.html">← Previous project</a>
+        <a href="p03.html">Next project →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

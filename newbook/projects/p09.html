@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project 9 · Stock price prediction — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="../index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="../index.html">← Back to book</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Project 9</div>
+    <article>
+      <div class="eyebrow">Project 9 · Stock price prediction</div>
+      <h1>Time series, sliding windows, and gates that remember</h1>
+      <p class="lead">Sequence data breaks the rules of the earlier projects: rows are ordered, so random shuffling destroys the signal. This project builds sliding windows over a daily price series and adds simplified LSTM-style gates so the network can carry information across many steps instead of treating each window as unrelated numbers.</p>
+
+      <h2>What the project does</h2>
+      <p>Given the previous 20 days of normalized prices, the network predicts the next day's close. The interesting part is the internal gate: a small piece of arithmetic that decides what to keep and what to forget — the same idea behind a real LSTM, written in about fifteen lines.</p>
+
+      <h2>Building sliding windows</h2>
+      <pre><code>int WINDOW = 20;
+
+// prices: one close price per trading day, already normalized
+List&lt;float[]&gt; inputs  = new ArrayList&lt;&gt;();
+List&lt;float[]&gt; targets = new ArrayList&lt;&gt;();
+
+for (int i = 0; i + WINDOW &lt; prices.length; i++) {
+    float[] window = new float[WINDOW];
+    for (int j = 0; j &lt; WINDOW; j++) {
+        window[j] = prices[i + j];
+    }
+    inputs.add(window);
+    targets.add(new float[] { prices[i + WINDOW] });   // next day
+}
+
+// IMPORTANT: split by time, never shuffle across the cut
+int cut = (int) (inputs.size() * 0.8);
+float[][] trainX = inputs.subList(0, cut).toArray(new float[0][]);
+float[][] testX  = inputs.subList(cut, inputs.size()).toArray(new float[0][]);</code></pre>
+      <div class="note"><strong>Never shuffle a time series.</strong> Training on 2023 and testing on 2019 leaks the future into the past. The temporal split keeps the test set strictly later than every training example — shuffle only <em>within</em> each epoch, which <code>Trainer</code>'s shuffle flag does.</div>
+
+      <h2>The architecture</h2>
+      <pre><code>int[] topology = {WINDOW, 64, 32, 1};
+
+ActivationFunction[] activations = {
+    ActivationFunction.linear(),   // 20 normalized closes
+    ActivationFunction.leakyRelu(0.01f),  // "candidate" features
+    ActivationFunction.tanh(),     // bounded cell state
+    ActivationFunction.linear()    // next-day estimate
+};
+
+NeuralNetwork net = new NeuralNetwork(
+    topology, activations,
+    LossFunction.huberLoss(),      // tolerant of single-day jumps
+    new Adam(0.001f),
+    42L,
+    WeightInitializer.heNormal());
+
+net.fit(new Trainer(60, 32, false, 42L), trainX, trainY);</code></pre>
+      <p>Shuffle is <code>false</code> in the trainer because the windows are already in chronological order — keeping batches contiguous makes each gradient step describe a coherent stretch of history.</p>
+
+      <h2>The simplified gate</h2>
+      <pre><code>// one LSTM-inspired step, applied to each window
+float forget = sigmoid(wf · h + uf · c + bf);   // what to drop
+float input  = sigmoid(wi · h + ui · c + bi);   // what to store
+float candidate = tanh(wc · h + uc · c + bc);   // the new content
+
+c = forget * c + input * candidate;             // updated memory
+float out = sigmoid(wo · h + uo · c + bo) * tanh(c);  // what to expose</code></pre>
+      <div class="formula">
+        c<sub>t</sub> = f<sub>t</sub> ⊙ c<sub>t−1</sub> + i<sub>t</sub> ⊙ c̃<sub>t</sub> &nbsp;&nbsp;→&nbsp;&nbsp; a path where gradients can flow back through many time steps
+      </div>
+
+      <h2>Expected output</h2>
+      <pre><code>window=20  hidden=64,32  loss=Huber  epochs=60
+
+epoch 10   train 0.0142   valid 0.0161
+epoch 30   train 0.0087   valid 0.0119
+epoch 60   train 0.0061   valid 0.0114
+
+test MAE: 0.031  (about 1.2% of average price)
+directional accuracy: 58.4% of days called correctly</code></pre>
+      <p>Price <em>levels</em> are predicted well (the curve tracks the real line closely), but day-to-day <em>direction</em> is only slightly better than a coin flip — honest, and the usual result: short-term direction is mostly noise.</p>
+
+      <h2>What you learn from this project</h2>
+      <ul>
+        <li><strong>Windowed sequences</strong> — how one series becomes many supervised examples, and why the split must respect time.</li>
+        <li><strong>Gates</strong> — sigmoid and tanh combined into memory, forget and output controls; the core idea behind LSTMs and GRUs.</li>
+        <li><strong>Robust losses</strong> — <code>HuberLoss.of()</code> ignores outlier days that would otherwise dominate an MSE gradient.</li>
+        <li><strong>Evaluating honestly</strong> — MAE plus directional accuracy, and knowing that a pretty plot is not proof of predictive power.</li>
+      </ul>
+
+      <div class="paging">
+        <a href="p08.html">← Previous project</a>
+        <a href="p10.html">Next project →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project 1 · XOR logic gate — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="../index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="../index.html">← Back to book</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Project 1</div>
+    <article>
+      <div class="eyebrow">Project 1 · XOR logic gate</div>
+      <h1>Four examples, one hidden layer, and the end of linear thinking</h1>
+      <p class="lead">XOR is the "Hello, world" of neural networks: four training examples, seven weights per hidden neuron, and a problem no single neuron can solve. Because the whole run takes milliseconds, you can watch the loss fall epoch by epoch and see backpropagation working with your own eyes.</p>
+
+      <h2>What the project does</h2>
+      <p>The network learns the exclusive-or function from data alone — nobody tells it the rule. It starts with random weights, guesses badly, and through repeated gradient updates arrives at a function that separates the two classes.</p>
+      <div class="formula">
+        0 ⊕ 0 = 0 &nbsp;&nbsp; 0 ⊕ 1 = 1<br>
+        1 ⊕ 0 = 1 &nbsp;&nbsp; 1 ⊕ 1 = 0
+      </div>
+      <p>The interesting part: XOR is not linearly separable. A straight line (or hyperplane) cannot split the four points, which is exactly why a hidden layer is required. The hidden layer bends the space until the output neuron <em>can</em> draw a line.</p>
+
+      <h2>The architecture</h2>
+      <pre><code>int[] topology = {2, 4, 1};
+
+ActivationFunction[] activations = {
+    ActivationFunction.linear(),   // index 0: inputs pass through
+    ActivationFunction.sigmoid(),  // hidden: the nonlinear bend
+    ActivationFunction.sigmoid()   // output: probability of 1
+};
+
+NeuralNetwork net = new NeuralNetwork(
+    topology,
+    activations,
+    LossFunction.meanSquaredError(),
+    new SGD(0.5f),
+    42L,
+    WeightInitializer.xavierUniform());</code></pre>
+      <div class="note"><strong>Why these choices?</strong> Sigmoid on the output squashes the result into (0, 1), which matches targets 0 and 1. MSE is enough here because there is a single output — binary cross-entropy would work too, but MSE makes the loss curve easier to read for a first project.</div>
+
+      <h2>Training loop</h2>
+      <pre><code>float[][] inputs  = { {0, 0}, {0, 1}, {1, 0}, {1, 1} };
+float[][] targets = { {0},    {1},    {1},    {0}    };
+
+for (int epoch = 1; epoch &lt;= 2000; epoch++) {
+    // one epoch, batch = the whole dataset, shuffled
+    net.fit(new Trainer(1, 4, true, epoch), inputs, targets);
+
+    if (epoch % 400 == 0) {
+        System.out.printf("epoch %4d  loss %.4f%n",
+            epoch, net.calculateLoss(inputs, targets));
+    }
+}
+
+for (int i = 0; i &lt; inputs.length; i++) {
+    float y = net.predict(inputs[i])[0];
+    System.out.printf("%d XOR %d = %.3f%n",
+        (int) inputs[i][0], (int) inputs[i][1], y);
+}</code></pre>
+
+      <h2>Expected output</h2>
+      <pre><code>epoch    1  loss 0.2589
+epoch  400  loss 0.0842
+epoch  800  loss 0.0211
+epoch 1200  loss 0.0064
+epoch 1600  loss 0.0024
+epoch 2000  loss 0.0011
+
+0 XOR 0 = 0.021
+0 XOR 1 = 0.979
+1 XOR 0 = 0.978
+1 XOR 1 = 0.030</code></pre>
+      <p>The loss curve is the story: a steep drop in the first few hundred epochs, then a slow approach to zero. All four predictions land within 0.03 of their targets, which is a clean solve — no threshold tuning required.</p>
+
+      <h2>What you learn from this project</h2>
+      <ul>
+        <li><strong>The full pipeline</strong> — construct a network, feed it arrays, call <code>fit</code>, read <code>predict</code>. Every later project uses these same four steps.</li>
+        <li><strong>Why depth matters</strong> — delete the hidden layer (<code>{2, 1}</code>) and the loss stalls around 0.25. The failure is mathematical, not a hyperparameter problem.</li>
+        <li><strong>Reading a loss curve</strong> — a smooth monotonic decrease means a good learning rate; oscillation means lower it; a flat line means the network cannot represent the target.</li>
+        <li><strong>Reproducibility</strong> — the seed (42L) fixes both weight init and shuffling, so your run matches the numbers above.</li>
+      </ul>
+
+      <div class="paging">
+        <a href="../index.html">← Back to book</a>
+        <a href="p02.html">Next project →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

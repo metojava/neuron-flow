@@ -1,0 +1,5 @@
+MiniCNN$MaxPool.class
+MiniCNN$Conv.class
+MiniCNN$Dense.class
+CNNApp.class
+MiniCNN.class

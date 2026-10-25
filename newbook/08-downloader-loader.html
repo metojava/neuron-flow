@@ -1,0 +1,421 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>08 · Downloader &amp; loader — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html">02 · Forward pass</a>
+      <a href="03-backprop.html">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses &amp; optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html" class="active">08 · Downloader &amp; loader</a>
+      <a href="09-keras-like.html">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html">10 · Evaluation &amp; confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html">13 · Run it</a>
+      <a href="14-full-walkthrough.html">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html">16 · Classical machine learning</a>
+      <a href="17-autograd.html">17 · Autograd</a>
+      <a href="18-transformers.html">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html">20 · GPT</a>
+      <a href="21-api-reference.html">21 · API reference</a>
+      <a href="performance.html">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Chapter 08</div>
+    <article>
+      <div class="eyebrow">08 · Downloader &amp; loader</div>
+      <h1>Fetching and parsing Fashion MNIST</h1>
+      <p class="lead">Two classes handle data: <code>FashionMNISTDownloader</code> downloads four <code>.gz</code> files from GitHub and decompresses them; <code>FashionMNISTLoader</code> parses the IDX bytes into ready-to-train arrays.</p>
+
+      <h2>8.1 FashionMNISTDownloader</h2>
+      <p>The source URL points at the official repository:</p>
+      <pre><code>https://raw.githubusercontent.com/zalandoresearch/fashion-mnist/master/data/fashion/</code></pre>
+
+      <h3>The files it fetches</h3>
+      <pre><code>train-images-idx3-ubyte.gz   # 60,000 training images
+train-labels-idx1-ubyte.gz   # 60,000 training labels
+t10k-images-idx3-ubyte.gz    # 10,000 test images
+t10k-labels-idx1-ubyte.gz    # 10,000 test labels</code></pre>
+
+      <h3>Public API</h3>
+      <table>
+        <tr><th>Method</th><th>Parameters</th><th>Returns</th><th>Behavior</th></tr>
+        <tr><td><code>download()</code></td><td>none</td><td><code>Path</code></td><td>Downloads into <code>data/fashion-mnist</code>.</td></tr>
+        <tr><td><code>download(Path dir)</code></td><td>target directory</td><td><code>Path</code></td><td>Creates the directory, downloads missing files only, skips files that already exist.</td></tr>
+        <tr><td><code>main(String[] args)</code></td><td>optional directory argument</td><td><code>void</code></td><td>CLI entry: <code>java FashionMNISTDownloader [dir]</code>.</td></tr>
+      </table>
+
+      <h3>The download loop</h3>
+      <pre><code>/**
+ * Downloads and decompresses the four Fashion-MNIST IDX files.
+ * Files already present (size &gt; 0) are skipped, so the call is
+ * cheap and safe to repeat.
+ *
+ * @param directory where the raw IDX files should live
+ * @return the same directory, for chaining
+ * @throws IOException            on network or filesystem errors
+ * @throws InterruptedException   if the thread is interrupted
+ */
+public static Path download(Path directory)
+        throws IOException, InterruptedException {
+
+    Files.createDirectories(directory);
+
+    for (String file : FILES) {
+        Path rawFile  = directory.resolve(file);
+        Path gzipFile = directory.resolve(file + ".gz");
+
+        if (Files.exists(rawFile) &amp;&amp; Files.size(rawFile) &gt; 0) {
+            System.out.println("Already available: " + rawFile);
+            continue;
+        }
+
+        System.out.println("Downloading " + file + ".gz");
+
+        try {
+            downloadFile(BASE_URL + file + ".gz", gzipFile);
+            decompress(gzipFile, rawFile);
+        } finally {
+            Files.deleteIfExists(gzipFile);   // never leave .gz behind
+        }
+
+        System.out.println("Saved " + rawFile);
+    }
+
+    System.out.println("Fashion-MNIST files are ready in: "
+        + directory.toAbsolutePath());
+
+    return directory;
+}</code></pre>
+
+      <h3>downloadFile — HTTP with Java 11+ HttpClient</h3>
+      <pre><code>/**
+ * Streams one URL to disk atomically: bytes go to a temporary file
+ * first, then the temp file is moved into place, so a failed
+ * download never leaves a half-written dataset file.
+ *
+ * @param url         absolute https URL
+ * @param destination final path of the downloaded file
+ * @throws IOException          non-200 status, empty body, I/O error
+ * @throws InterruptedException if interrupted while waiting
+ */
+private static void downloadFile(String url, Path destination)
+        throws IOException, InterruptedException {
+
+    Path temporary = Files.createTempFile(
+        destination.getParent(), "fashionmnist-", ".download");
+
+    try {
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(Duration.ofMinutes(3))
+            .GET()
+            .build();
+
+        HttpResponse&lt;InputStream&gt; response = CLIENT.send(
+            request, HttpResponse.BodyHandlers.ofInputStream());
+
+        try (InputStream input = response.body()) {
+            if (response.statusCode() != 200) {
+                throw new IOException(
+                    "Download failed with HTTP status "
+                        + response.statusCode() + ": " + url);
+            }
+
+            try (OutputStream output =
+                     Files.newOutputStream(temporary)) {
+                input.transferTo(output);   // efficient bulk copy
+            }
+        }
+
+        if (Files.size(temporary) == 0) {
+            throw new IOException("Downloaded file is empty: " + url);
+        }
+
+        Files.move(temporary, destination,
+            StandardCopyOption.REPLACE_EXISTING);
+    } finally {
+        Files.deleteIfExists(temporary);
+    }
+}</code></pre>
+
+      <h3>decompress — gzip → raw IDX</h3>
+      <pre><code>/**
+ * Inflates a .gz file into its raw IDX form.
+ *
+ * @param gzipFile   the compressed file
+ * @param outputFile the raw IDX file to produce
+ * @throws IOException if the archive is empty or unreadable
+ */
+private static void decompress(Path gzipFile, Path outputFile)
+        throws IOException {
+
+    Path temporary = Files.createTempFile(
+        outputFile.getParent(), "fashionmnist-", ".raw");
+
+    try {
+        try (InputStream input =
+                 new GZIPInputStream(Files.newInputStream(gzipFile));
+             OutputStream output =
+                 Files.newOutputStream(temporary)) {
+            input.transferTo(output);
+        }
+
+        if (Files.size(temporary) == 0) {
+            throw new IOException("Decompressed file is empty");
+        }
+
+        Files.move(temporary, outputFile,
+            StandardCopyOption.REPLACE_EXISTING);
+    } finally {
+        Files.deleteIfExists(temporary);
+    }
+}</code></pre>
+
+      <div class="note"><strong>Design lesson:</strong> download-and-rename is the standard pattern for dataset fetching. The target filename appears only when the data is complete, so an interrupted run just re-downloads next time.</div>
+
+      <h2>8.2 FashionMNISTLoader</h2>
+      <p>Constants and the nested <code>Dataset</code> holder first:</p>
+      <pre><code>public final class FashionMNISTLoader {
+
+    public static final int IMAGE_ROWS = 28;
+    public static final int IMAGE_COLS = 28;
+    public static final int INPUT_SIZE = IMAGE_ROWS * IMAGE_COLS;  // 784
+    public static final int NUM_CLASSES = 10;
+
+    private static final int IMAGE_MAGIC = 2051;   // 0x00000803
+    private static final int LABEL_MAGIC = 2049;   // 0x00000801
+
+    /** The ten class names, index = label value. */
+    public static final String[] CLASS_NAMES = {
+        "T-shirt/top", "Trouser", "Pullover", "Dress", "Coat",
+        "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot"
+    };
+
+    /** Holds normalized images and their integer labels. */
+    public static final class Dataset {
+        private final double[][] images;   // [N][784], each in [0,1]
+        private final int[] labels;        // [N], each in 0..9
+
+        /** @return number of examples in this split */
+        public int size()             { return images.length; }
+
+        /** @return all images, [N][784] */
+        public double[][] getImages() { return images; }
+
+        /** @param index row index
+         *  @return      one 784-pixel vector */
+        public double[] getImage(int index) { return images[index]; }
+
+        /** @return all labels, [N] */
+        public int[] getLabels()      { return labels; }
+
+        /** @param index row index
+         *  @return      class id 0..9 */
+        public int getLabel(int index){ return labels[index]; }
+
+        /** @return labels as an [N][10] one-hot matrix */
+        public double[][] getOneHotTargets() { /* ... */ }
+
+        /** @param index row index
+         *  @return      its one-hot vector */
+        public double[] getOneHotTarget(int index) { /* ... */ }
+    }
+}</code></pre>
+
+      <h3>Loading entry points</h3>
+      <pre><code>/**
+ * Loads the 60,000-example training split from a directory.
+ *
+ * @param directory folder containing the four IDX files
+ * @return Dataset with images and labels
+ * @throws IOException if a file is missing, malformed or truncated
+ */
+public static Dataset loadTraining(Path directory) throws IOException {
+    return load(
+        directory.resolve("train-images-idx3-ubyte"),
+        directory.resolve("train-labels-idx1-ubyte"));
+}
+
+/**
+ * Loads the 10,000-example test split from a directory.
+ *
+ * @param directory folder containing the four IDX files
+ * @return Dataset with images and labels
+ * @throws IOException if a file is missing, malformed or truncated
+ */
+public static Dataset loadTest(Path directory) throws IOException {
+    return load(
+        directory.resolve("t10k-images-idx3-ubyte"),
+        directory.resolve("t10k-labels-idx1-ubyte"));
+}
+
+/**
+ * Loads and pairs an image file with its label file.
+ *
+ * @param imageFile IDX file with magic 2051
+ * @param labelFile IDX file with magic 2049
+ * @return Dataset whose row i pairs image i with label i
+ * @throws IOException on header, size or count mismatches
+ */
+public static Dataset load(Path imageFile, Path labelFile)
+        throws IOException {
+
+    double[][] images = loadImages(imageFile);
+    int[] labels = loadLabels(labelFile);
+
+    if (images.length != labels.length) {
+        throw new IOException(
+            "Image count (" + images.length
+                + ") does not match label count ("
+                + labels.length + ")");
+    }
+
+    return new Dataset(images, labels);
+}</code></pre>
+
+      <h3>Parsing the image file</h3>
+      <pre><code>/**
+ * Reads an IDX image file into a normalized [count][784] array.
+ *
+ * @param path the raw (decompressed) image file
+ * @return pixel matrix with values scaled to [0, 1]
+ * @throws IOException wrong magic, wrong dimensions, unexpected
+ *                     file size, truncated data, or trailing bytes
+ */
+public static double[][] loadImages(Path path) throws IOException {
+    try (DataInputStream in = input(path)) {
+        int magic = in.readInt();
+        int count = in.readInt();
+        int rows  = in.readInt();
+        int cols  = in.readInt();
+
+        if (magic != IMAGE_MAGIC) {
+            throw new IOException(
+                "Invalid image IDX magic number in " + path);
+        }
+
+        if (count &lt;= 0 || rows != IMAGE_ROWS || cols != IMAGE_COLS) {
+            throw new IOException(
+                "Unexpected Fashion-MNIST image dimensions in " + path);
+        }
+
+        // size check before allocating tens of megabytes
+        long expectedLength = 16L + (long) count * rows * cols;
+        if (Files.size(path) != expectedLength) {
+            throw new IOException("Unexpected image file size in " + path);
+        }
+
+        double[][] images = new double[count][INPUT_SIZE];
+
+        for (int i = 0; i &lt; count; i++) {
+            for (int p = 0; p &lt; INPUT_SIZE; p++) {
+                images[i][p] = in.readUnsignedByte() / 255.0;
+            }
+        }
+
+        ensureEndOfFile(in, path);
+        return images;
+    } catch (EOFException e) {
+        throw new IOException("Truncated image file: " + path, e);
+    }
+}</code></pre>
+
+      <h3>Parsing the label file</h3>
+      <pre><code>/**
+ * Reads an IDX label file into an int array.
+ *
+ * @param path the raw (decompressed) label file
+ * @return label ids, each guaranteed to be in [0, 9]
+ * @throws IOException wrong magic, wrong size, bad label value,
+ *                     truncated data or trailing bytes
+ */
+public static int[] loadLabels(Path path) throws IOException {
+    try (DataInputStream in = input(path)) {
+        int magic = in.readInt();
+        int count = in.readInt();
+
+        if (magic != LABEL_MAGIC || count &lt;= 0) {
+            throw new IOException("Invalid label IDX header in " + path);
+        }
+
+        long expectedLength = 8L + count;
+        if (Files.size(path) != expectedLength) {
+            throw new IOException("Unexpected label file size in " + path);
+        }
+
+        int[] labels = new int[count];
+
+        for (int i = 0; i &lt; count; i++) {
+            int label = in.readUnsignedByte();
+
+            if (label &gt;= NUM_CLASSES) {
+                throw new IOException(
+                    "Invalid label " + label + " at index " + i);
+            }
+
+            labels[i] = label;
+        }
+
+        ensureEndOfFile(in, path);
+        return labels;
+    } catch (EOFException e) {
+        throw new IOException("Truncated label file: " + path, e);
+    }
+}</code></pre>
+
+      <h3>Two small helpers</h3>
+      <pre><code>/** Wraps a file stream so readInt/readUnsignedByte work on big-endian bytes. */
+private static DataInputStream input(Path path) throws IOException {
+    return new DataInputStream(
+        new BufferedInputStream(Files.newInputStream(path)));
+}
+
+/** Fails the load if any unexpected byte remains after the payload. */
+private static void ensureEndOfFile(DataInputStream in, Path path)
+        throws IOException {
+    if (in.read() != -1) {
+        throw new IOException("Unexpected trailing bytes in " + path);
+    }
+}</code></pre>
+
+      <h2>8.3 End-to-end usage</h2>
+      <pre><code>Path dir = Path.of("data", "fashion-mnist");
+
+FashionMNISTDownloader.download(dir);              // once
+
+FashionMNISTLoader.Dataset train =
+    FashionMNISTLoader.loadTraining(dir);          // 60,000 rows
+FashionMNISTLoader.Dataset test =
+    FashionMNISTLoader.loadTest(dir);              // 10,000 rows
+
+double[][] x = train.getImages();                  // [60000][784]
+double[][] y = train.getOneHotTargets();           // [60000][10]</code></pre>
+
+      <div class="paging">
+        <a href="07-data.html">← 07 · Fashion MNIST data</a>
+        <a href="09-keras-like.html">09 · Keras-like classifier →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

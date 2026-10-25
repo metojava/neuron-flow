@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project 7 · Image autoencoder — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="../index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="../index.html">← Back to book</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Project 7</div>
+    <article>
+      <div class="eyebrow">Project 7 · Image autoencoder</div>
+      <h1>Squeeze 784 numbers into 32 — then rebuild them</h1>
+      <p class="lead">An autoencoder is trained with no labels at all: the input image is also the target. The network must compress each image into 32 values and then reconstruct all 784 pixels from that bottleneck, which forces the 32 numbers to encode only what really matters about the data.</p>
+
+      <h2>What the project does</h2>
+      <p>784 pixels in, 32 numbers in the middle, 784 pixels out. The interesting part is the middle layer: those 32 values are a learned <em>latent representation</em>, and you can visualize them to see the network group similar images without ever being told the class labels.</p>
+      <div class="flow">
+        <span>Encode <small>784 → 128 → 32</small></span><b>→</b>
+        <span>Bottleneck <small>32 values</small></span><b>→</b>
+        <span>Decode <small>32 → 128 → 784</small></span><b>→</b>
+        <span>Compare <small>input vs output</small></span>
+      </div>
+
+      <h2>The architecture</h2>
+      <pre><code>int[] topology = {784, 128, 32, 128, 784};
+
+ActivationFunction[] activations = {
+    ActivationFunction.linear(),  // pixels in [0, 1]
+    ActivationFunction.relu(),    // encoder
+    ActivationFunction.tanh(),    // latent: signed, centered at 0
+    ActivationFunction.relu(),    // decoder
+    ActivationFunction.sigmoid()  // pixels out in [0, 1]
+};
+
+NeuralNetwork net = new NeuralNetwork(
+    topology, activations,
+    LossFunction.meanSquaredError(),
+    new Adam(0.001f),
+    42L,
+    WeightInitializer.heNormal());</code></pre>
+      <div class="note"><strong>Same shape in and out — same loss.</strong> MSE compares the reconstruction pixel by pixel with the original. Sigmoid on the final layer keeps outputs in [0, 1] so they are directly comparable to the input pixels.</div>
+
+      <h2>Training — the target is the input</h2>
+      <pre><code>FashionMNISTDownloader.ensureDownloaded();
+float[][] images = FashionMNISTLoader.load(dir).trainImages();
+
+// no labels anywhere: x → x
+net.fit(new Trainer(20, 64, true, 42L), images, images);
+
+// reconstruct a few test images
+for (int i = 0; i &lt; 5; i++) {
+    float[] original  = testImages[i];
+    float[] rebuilt   = net.predict(original);
+    System.out.printf("image %d  MSE %.4f%n", i,
+        meanSquaredError(original, rebuilt));
+}</code></pre>
+
+      <h2>Reading the latent space</h2>
+      <pre><code>// the bottleneck is the output of layer index 2
+private static float[] encode(NeuralNetwork net, float[] image) {
+    net.forwardPropagate(image);          // run the full pass
+    Layer hidden = /* layer 2 of the network */;
+    float[] z = new float[32];
+    for (int i = 0; i &lt; z.length; i++) {
+        z[i] = hidden.neurons[i].value;
+    }
+    return z;
+}
+
+// project 32 dims onto two axes for a scatter plot
+for (int i = 0; i &lt; testImages.length; i++) {
+    float[] z = encode(net, testImages[i]);
+    plot(z[0], z[1], testLabels[i]);      // colour by true class
+}</code></pre>
+
+      <h2>Expected output</h2>
+      <pre><code>epoch  1  reconstruction MSE 0.0712
+epoch  5  reconstruction MSE 0.0304
+epoch 10  reconstruction MSE 0.0218
+epoch 20  reconstruction MSE 0.0173
+
+image 0  MSE 0.0164
+image 1  MSE 0.0189
+image 2  MSE 0.0155
+image 3  MSE 0.0221
+image 4  MSE 0.0170</code></pre>
+      <p>Rendered as characters, inputs and reconstructions look alike: smooth shapes survive, fine texture does not. The scatter of latent values forms visible clusters — trousers and sneakers separate cleanly even though no label was ever used during training.</p>
+
+      <h2>What you learn from this project</h2>
+      <ul>
+        <li><strong>Unsupervised learning</strong> — a training signal can come from the data itself, not from human labels.</li>
+        <li><strong>Bottlenecks and compression</strong> — forcing information through a narrow layer is what makes a representation useful; widen it to 256 and reconstruction improves but structure disappears.</li>
+        <li><strong>Symmetric architectures</strong> — encoder and decoder mirror each other, a pattern you will see again in project 12's generator.</li>
+        <li><strong>Inspecting hidden layers</strong> — reading <code>neuron.value</code> after a forward pass gives you the network's internal features.</li>
+      </ul>
+
+      <div class="paging">
+        <a href="p06.html">← Previous project</a>
+        <a href="p08.html">Next project →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,425 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>14 · Full code — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html">02 · Forward pass</a>
+      <a href="03-backprop.html">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses &amp; optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html">08 · Downloader &amp; loader</a>
+      <a href="09-keras-like.html">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html">10 · Evaluation &amp; confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html">13 · Run it</a>
+      <a href="14-full-walkthrough.html" class="active">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html">16 · Classical machine learning</a>
+      <a href="17-autograd.html">17 · Autograd</a>
+      <a href="18-transformers.html">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html">20 · GPT</a>
+      <a href="21-api-reference.html">21 · API reference</a>
+      <a href="performance.html">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Chapter 14</div>
+    <article>
+      <div class="eyebrow">14 · Full code</div>
+      <h1>Complete listing of the core classes</h1>
+      <p class="lead">This chapter reproduces the essential classes in full so you can read them side by side with the explanations from earlier chapters. All code uses <code>float</code> precision and lives in the packages shown in chapter 13.</p>
+
+      <h2>14.1 Neuron</h2>
+      <pre><code>package layers;
+
+import java.util.Random;
+
+/**
+ * One artificial neuron: holds its weights (one per input),
+ * its bias, the activation from the last forward pass, and the
+ * error signal (gradient) from the last backward pass.
+ */
+public class Neuron {
+
+    /** One weight per upstream neuron (input layer: length 0). */
+    public float[] weights;
+
+    /** Additive bias applied before activation. */
+    public float bias;
+
+    /** Activation a = f(z) cached from the last forward pass. */
+    public float value;
+
+    /** Backpropagated error signal for this neuron. */
+    public float gradient;
+
+    public Neuron(int numInputs, Random rand) {
+        this.weights = new float[numInputs];
+        for (int i = 0; i &lt; numInputs; i++) {
+            this.weights[i] = rand.nextFloat() * 2.0f - 1.0f;
+        }
+        this.bias = rand.nextFloat() * 2.0f - 1.0f;
+    }
+}</code></pre>
+
+      <h2>14.2 Layer</h2>
+      <pre><code>package layers;
+
+import java.util.Random;
+
+/**
+ * A layer is a fixed-size row of neurons that all share the
+ * same number of inputs. The input layer is created with zero
+ * inputs per neuron: its neurons only store values.
+ */
+public class Layer {
+
+    /** Neurons of this layer, in order. */
+    public Neuron[] neurons;
+
+    public Layer(int numNeurons, int numInputsPerNeuron,
+                 Random rand) {
+        this.neurons = new Neuron[numNeurons];
+        for (int i = 0; i &lt; numNeurons; i++) {
+            this.neurons[i] =
+                new Neuron(numInputsPerNeuron, rand);
+        }
+    }
+}</code></pre>
+
+      <h2>14.3 NeuralNetwork (forward + backprop, SIMD-accelerated)</h2>
+      <pre><code>package layers;
+
+import activations.ActivationFunction;
+import initialization.WeightInitializer;
+import losses.LossFunction;
+import optim.Optimizer;
+import optim.SGD;
+import training.Trainer;
+import vector.VectorMath;
+
+import java.util.Random;
+
+public class NeuralNetwork {
+
+    private final Layer[] layers;
+    private final ActivationFunction[] activations;
+    private final LossFunction lossFunction;
+    private final Optimizer optimizer;
+    private final float[] prevBuffer;   // SIMD dot-product buffer
+    private final float[] deltaBuffer;  // backprop delta buffer
+
+    public NeuralNetwork(
+            int[] topology,
+            ActivationFunction[] activations,
+            LossFunction lossFunction,
+            Optimizer optimizer,
+            long seed,
+            WeightInitializer initializer) {
+        // ... validation omitted for brevity ...
+        this.activations = activations.clone();
+        this.lossFunction = lossFunction;
+        this.optimizer = optimizer;
+        this.layers = new Layer[topology.length];
+
+        int maxSize = 0;
+        for (int size : topology) {
+            if (size &gt; maxSize) maxSize = size;
+        }
+        this.prevBuffer = new float[maxSize];
+        this.deltaBuffer = new float[maxSize];
+
+        Random rand = new Random(seed);
+        layers[0] = new Layer(topology[0], 0, rand);
+
+        for (int l = 1; l &lt; topology.length; l++) {
+            int fanIn = topology[l - 1];
+            int fanOut = topology[l];
+            layers[l] = new Layer(topology[l], fanIn, rand);
+            for (Neuron neuron : layers[l].neurons) {
+                initializer.initialize(
+                    neuron.weights, fanIn, fanOut, rand);
+                neuron.bias = 0.0f;
+            }
+        }
+    }
+
+    /** SIMD-accelerated forward propagation. */
+    public float[] forwardPropagate(float[] inputs) {
+        // ... input validation ...
+        for (int i = 0; i &lt; inputs.length; i++) {
+            layers[0].neurons[i].value = inputs[i];
+        }
+
+        for (int l = 1; l &lt; layers.length; l++) {
+            Layer previous = layers[l - 1];
+            Layer current  = layers[l];
+            int prevLen = previous.neurons.length;
+
+            // copy previous activations into a flat buffer
+            for (int j = 0; j &lt; prevLen; j++) {
+                prevBuffer[j] = previous.neurons[j].value;
+            }
+
+            for (Neuron neuron : current.neurons) {
+                float sum = neuron.bias
+                    + VectorMath.dot(prevBuffer,
+                                     neuron.weights, prevLen);
+                neuron.value = activations[l].activate(sum);
+            }
+        }
+
+        Layer output = layers[layers.length - 1];
+        float[] result = new float[output.neurons.length];
+        for (int i = 0; i &lt; result.length; i++) {
+            result[i] = output.neurons[i].value;
+        }
+        return result;
+    }
+
+    /** One mini-batch: forward, backprop, accumulate, step. */
+    public void trainBatch(float[][] inputs,
+                           float[][] targets) {
+        // ... validation ...
+        float[] parameters = flattenParameters();
+        float[] gradients = new float[parameters.length];
+
+        for (int sample = 0; sample &lt; inputs.length; sample++) {
+            float[] prediction =
+                forwardPropagate(inputs[sample]);
+
+            float[] outputGradient =
+                lossFunction.gradient(prediction, targets[sample]);
+
+            Layer outputLayer = layers[layers.length - 1];
+            for (int i = 0; i &lt; outputLayer.neurons.length; i++) {
+                Neuron neuron = outputLayer.neurons[i];
+                neuron.gradient = outputGradient[i]
+                    * activations[layers.length - 1]
+                        .derivativeFromOutput(neuron.value);
+            }
+
+            // hidden-layer deltas, SIMD-accumulated
+            for (int l = layers.length - 2; l &gt; 0; l--) {
+                Layer current = layers[l];
+                Layer next    = layers[l + 1];
+                int curLen = current.neurons.length;
+
+                for (int i = 0; i &lt; curLen; i++) {
+                    deltaBuffer[i] = 0.0f;
+                }
+                for (Neuron nextNeuron : next.neurons) {
+                    VectorMath.addScaledScalar(
+                        deltaBuffer, 0, nextNeuron.gradient,
+                        nextNeuron.weights, curLen);
+                }
+                for (int i = 0; i &lt; curLen; i++) {
+                    Neuron neuron = current.neurons[i];
+                    neuron.gradient = deltaBuffer[i]
+                        * activations[l].derivativeFromOutput(
+                            neuron.value);
+                }
+            }
+
+            // accumulate parameter gradients, SIMD-scattered
+            int k = 0;
+            for (int l = 1; l &lt; layers.length; l++) {
+                Layer previous = layers[l - 1];
+                int prevLen = previous.neurons.length;
+                for (int j = 0; j &lt; prevLen; j++) {
+                    prevBuffer[j] = previous.neurons[j].value;
+                }
+                for (Neuron neuron : layers[l].neurons) {
+                    VectorMath.addScaledScalar(
+                        gradients, k, neuron.gradient,
+                        prevBuffer, prevLen);
+                    k += prevLen;
+                    gradients[k++] += neuron.gradient;
+                }
+            }
+        }
+
+        for (int i = 0; i &lt; gradients.length; i++) {
+            gradients[i] /= inputs.length;
+        }
+        optimizer.update(parameters, gradients);
+        unflattenParameters(parameters);
+    }
+
+    // fit(), calculateLoss(), flatten/unflatten omitted —
+    // see the source file for the full implementations.
+}</code></pre>
+
+      <h2>14.4 VectorMath (SIMD helpers)</h2>
+      <pre><code>package vector;
+
+import jdk.incubator.vector.FloatVector;
+import jdk.incubator.vector.VectorOperators;
+import jdk.incubator.vector.VectorSpecies;
+
+public final class VectorMath {
+
+    private static final VectorSpecies&lt;Float&gt; SPECIES =
+        FloatVector.SPECIES_PREFERRED;
+
+    /** Dot product of the first n elements of a and b. */
+    public static float dot(float[] a, float[] b, int n) {
+        int i = 0;
+        int limit = SPECIES.loopBound(n);
+        FloatVector acc = FloatVector.zero(SPECIES);
+
+        for (; i &lt; limit; i += SPECIES.length()) {
+            FloatVector va =
+                FloatVector.fromArray(SPECIES, a, i);
+            FloatVector vb =
+                FloatVector.fromArray(SPECIES, b, i);
+            acc = va.fma(vb, acc);          // acc += va * vb
+        }
+
+        float sum = acc.reduceLanes(VectorOperators.ADD);
+        for (; i &lt; n; i++) {
+            sum += a[i] * b[i];
+        }
+        return sum;
+    }
+
+    /** out[outOffset + i] += scalar * b[i] for i in [0, n). */
+    public static void addScaledScalar(float[] out, int outOffset,
+                                       float scalar, float[] b,
+                                       int n) {
+        int i = 0;
+        int limit = SPECIES.loopBound(n);
+        FloatVector vScalar =
+            FloatVector.broadcast(SPECIES, scalar);
+
+        for (; i &lt; limit; i += SPECIES.length()) {
+            FloatVector vo = FloatVector.fromArray(
+                SPECIES, out, outOffset + i);
+            FloatVector vb =
+                FloatVector.fromArray(SPECIES, b, i);
+            vo = vScalar.fma(vb, vo);
+            vo.intoArray(out, outOffset + i);
+        }
+
+        for (; i &lt; n; i++) {
+            out[outOffset + i] += scalar * b[i];
+        }
+    }
+
+    // relu(float[]) and addScalar(float[], float) also available.
+
+    private VectorMath() { }
+}</code></pre>
+
+      <h2>14.5 Trainer</h2>
+      <pre><code>package training;
+
+import java.util.Random;
+
+public class Trainer {
+
+    private final int epochs;
+    private final int batchSize;
+    private final boolean shuffle;
+    private final Random random;
+
+    public Trainer(int epochs, int batchSize, boolean shuffle,
+                   long seed) {
+        if (epochs &lt;= 0 || batchSize &lt;= 0) {
+            throw new IllegalArgumentException(
+                "Epochs and batch size must be positive");
+        }
+        this.epochs = epochs;
+        this.batchSize = batchSize;
+        this.shuffle = shuffle;
+        this.random = new Random(seed);
+    }
+
+    public int getEpochs()        { return epochs; }
+    public int getBatchSize()     { return batchSize; }
+    public boolean shouldShuffle(){ return shuffle; }
+    public Random getRandom()     { return random; }
+}</code></pre>
+
+      <h2>14.6 LossFunction (softmax cross-entropy excerpt)</h2>
+      <pre><code>package losses;
+
+public interface LossFunction {
+
+    float loss(float[] predictions, float[] targets);
+    float[] gradient(float[] predictions, float[] targets);
+
+    /**
+     * Numerically stable softmax cross-entropy. The gradient
+     * is (softmax(logits) - target); pair with a linear output.
+     */
+    static LossFunction softmaxCrossEntropy() {
+        return new LossFunction() {
+            @Override
+            public float loss(float[] p, float[] t) {
+                float max = p[0];
+                for (int i = 1; i &lt; p.length; i++) {
+                    if (p[i] &gt; max) max = p[i];
+                }
+                float sumExp = 0.0f;
+                for (int i = 0; i &lt; p.length; i++) {
+                    sumExp += (float) Math.exp(p[i] - max);
+                }
+                float logSumExp =
+                    max + (float) Math.log(sumExp);
+                float nll = 0.0f;
+                for (int i = 0; i &lt; p.length; i++) {
+                    nll += t[i] * (logSumExp - p[i]);
+                }
+                return nll;
+            }
+
+            @Override
+            public float[] gradient(float[] p, float[] t) {
+                float[] g = new float[p.length];
+                float max = p[0];
+                for (int i = 1; i &lt; p.length; i++) {
+                    if (p[i] &gt; max) max = p[i];
+                }
+                float sumExp = 0.0f;
+                for (int i = 0; i &lt; p.length; i++) {
+                    float e = (float) Math.exp(p[i] - max);
+                    g[i] = e;
+                    sumExp += e;
+                }
+                for (int i = 0; i &lt; p.length; i++) {
+                    g[i] = g[i] / sumExp - t[i];
+                }
+                return g;
+            }
+        };
+    }
+}</code></pre>
+
+      <div class="note"><strong>The remaining classes</strong> — <code>ActivationFunction</code>, <code>SGD</code>, <code>Adam</code>, <code>WeightInitializer</code>, <code>ClassificationMetrics</code>, <code>MNISTLoader</code>, <code>FashionMNISTLoader</code>, and the runners — follow the same pattern: small, self-contained, fully documented in the source tree under <code>src/main/java/</code>.</div>
+
+      <div class="paging">
+        <a href="13-run.html">← 13 · Run it</a>
+        <a href="15-practice.html">15 · Practice →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

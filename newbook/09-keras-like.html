@@ -1,0 +1,234 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>09 · Keras-like classifier — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html">02 · Forward pass</a>
+      <a href="03-backprop.html">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses &amp; optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html">08 · Downloader &amp; loader</a>
+      <a href="09-keras-like.html" class="active">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html">10 · Evaluation &amp; confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html">13 · Run it</a>
+      <a href="14-full-walkthrough.html">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html">16 · Classical machine learning</a>
+      <a href="17-autograd.html">17 · Autograd</a>
+      <a href="18-transformers.html">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html">20 · GPT</a>
+      <a href="21-api-reference.html">21 · API reference</a>
+      <a href="performance.html">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Chapter 09</div>
+    <article>
+      <div class="eyebrow">09 · Keras-like classifier</div>
+      <h1>FashionMNISTRunner: train in five lines, explain in fifty</h1>
+      <p class="lead">The goal model is the classic Keras starter. This chapter shows the direct Java translation, then walks through the whole runner with every constant, parameter and log line explained.</p>
+
+      <h2>9.1 The Keras original</h2>
+      <pre><code>model = tf.keras.Sequential([
+    tf.keras.layers.Flatten(input_shape=(28, 28)),
+    tf.keras.layers.Dense(128, activation='relu'),
+    tf.keras.layers.Dense(10)
+])</code></pre>
+
+      <h2>9.2 The Java translation</h2>
+      <pre><code>// Flatten(input_shape=(28,28))  -> an input layer of 784 value-only
+//                                 neurons (784 = 28 * 28)
+// Dense(128, activation='relu') -> 128 hidden neurons, ReLU
+// Dense(10)                     -> 10 output neurons, linear scores
+
+int[] topology = {INPUTS, 128, CLASSES};       // {784, 128, 10}
+
+ActivationFunction[] activations = {
+    ActivationFunction.linear(),   // input (identity, no weights)
+    ActivationFunction.relu(),     // Dense(128, relu)
+    ActivationFunction.linear()    // Dense(10) — plain scores
+};
+
+NeuralNetwork network = new NeuralNetwork(
+    topology,
+    activations,
+    LossFunction.meanSquaredError(),
+    new Adam(0.001),
+    SEED
+);</code></pre>
+
+      <div class="note"><strong>Mapping table.</strong> Keras <code>Flatten</code> = fixed 784-value input layer here (the loader already flattens each image to a 784-vector). Keras <code>Dense(10)</code> with no activation = <code>linear()</code>. The loss differs: Keras examples often use <code>from_logits</code> softmax cross-entropy, while this library's starter uses MSE over linear outputs — that's why argmax, not softmax, picks the class.</div>
+
+      <h3>Architecture parameters</h3>
+      <table>
+        <tr><th>Constant</th><th>Value</th><th>Meaning</th></tr>
+        <tr><td><code>INPUTS</code></td><td>784</td><td>28×28 pixels, already normalized to [0,1] by the loader.</td></tr>
+        <tr><td><code>CLASSES</code></td><td>10</td><td>Fashion categories; also the one-hot width.</td></tr>
+        <tr><td>hidden</td><td>128</td><td>ReLU units — same as Keras' Dense(128).</td></tr>
+        <tr><td><code>EPOCHS</code></td><td>10</td><td>Full passes over the training set.</td></tr>
+        <tr><td><code>BATCH_SIZE</code></td><td>128</td><td>Samples per gradient update.</td></tr>
+        <tr><td><code>SEED</code></td><td>123</td><td>Fixed RNG seed: same weights and same shuffles every run.</td></tr>
+        <tr><td>learning rate</td><td>0.001</td><td>Adam's standard default.</td></tr>
+      </table>
+
+      <h2>9.3 The main() flow</h2>
+      <pre><code>/**
+ * Command-line driver for the Fashion-MNIST classifier.
+ *
+ * @param args optional "--quick" to train on only 8,000 examples
+ * @throws Exception on download, file or training errors
+ */
+public static void main(String[] args) throws Exception {
+    boolean quickMode = Arrays.asList(args).contains("--quick");
+
+    Path dataDirectory = Path.of("data", "fashion-mnist");
+
+    // 1. Dataset on disk? download if missing
+    FashionMNISTDownloader.download(dataDirectory);
+
+    // 2. Parse IDX into arrays
+    FashionMNISTLoader.Dataset training =
+        FashionMNISTLoader.loadTraining(dataDirectory);
+    FashionMNISTLoader.Dataset testing =
+        FashionMNISTLoader.loadTest(dataDirectory);
+
+    // 3. Optional subset for a fast smoke test
+    int trainingCount = quickMode
+        ? Math.min(8000, training.size())
+        : training.size();
+
+    double[][] trainImages = Arrays.copyOf(
+        training.getImages(), trainingCount);
+    int[] trainLabels = Arrays.copyOf(
+        training.getLabels(), trainingCount);
+
+    double[][] trainTargets = oneHotEncode(trainLabels);
+    double[][] testImages  = testing.getImages();
+    int[] testLabels = testing.getLabels();
+
+    // 4. Build the Keras-like model (see above)
+
+    // 5. Train epoch by epoch, logging loss / accuracy / time
+    for (int epoch = 1; epoch &lt;= EPOCHS; epoch++) {
+        Trainer trainer = new Trainer(
+            1,               // one epoch per iteration
+            BATCH_SIZE,
+            true,            // shuffle
+            SEED + epoch     // new, reproducible shuffle each epoch
+        );
+
+        long epochStart = System.currentTimeMillis();
+
+        network.fit(trainer, trainImages, trainTargets);
+
+        double loss     = network.calculateLoss(trainImages, trainTargets);
+        double accuracy = evaluateAccuracy(network, testImages, testLabels);
+        long elapsed    = System.currentTimeMillis() - epochStart;
+
+        System.out.printf("%-7d %13.6f %10.2f%% %7.1f s%n",
+            epoch, loss, accuracy * 100.0, elapsed / 1000.0);
+    }
+
+    // 6. Final evaluation + sample predictions
+    evaluate(network, testImages, testLabels);
+}</code></pre>
+
+      <h3>The console output looks like this</h3>
+      <pre><code>Training (Keras-like simple model)...
+Epoch      Train loss    Accuracy      Time
+-------------------------------------------
+1            0.048426      73.53%     3.9 s
+2            0.039638      77.75%     3.6 s
+3            0.036067      79.00%     3.7 s
+4            0.032357      81.14%     3.7 s
+5            0.030762      81.61%     3.8 s
+6            0.028398      82.43%     3.7 s
+7            0.027136      83.03%     3.7 s
+8            0.025725      83.44%     3.7 s
+9            0.024997      83.28%     3.7 s
+10           0.024986      83.46%     3.7 s
+
+Training completed in 37.3 s
+Final training loss: 0.024986
+Test accuracy: 83.46%</code></pre>
+
+      <p>(Quick mode with 8,000 examples; a full run uses all 60,000 and reaches roughly 87–89%.)</p>
+
+      <h2>9.4 Why train one epoch at a time?</h2>
+      <p>Calling <code>fit</code> once with <code>epochs = 10</code> would be shorter code, but nothing could be printed in between. Wrapping the call in a loop lets each epoch be timed and evaluated separately — loss, accuracy and wall-clock seconds per epoch, exactly what you want when tuning hyper-parameters. Each epoch gets a fresh <code>Trainer</code> with seed <code>SEED + epoch</code>, so shuffling stays reproducible but differs between epochs.</p>
+
+      <h2>9.5 Choosing quick vs full mode</h2>
+      <pre><code># quick smoke test (~40 s): 8,000 examples, 10 epochs
+java -cp target/classes FashionMNISTRunner --quick
+
+# full training: 60,000 examples, 10 epochs (takes minutes)
+java -cp target/classes FashionMNISTRunner</code></pre>
+
+      <h2>9.6 The current version: <code>FashionMnistKerasLike</code></h2>
+      <p class="lead">The sections above describe the first version, which used <code>NeuralNetwork</code> with MSE loss and one sample at a time. The current class in <code>projects/fashion-mnist</code> keeps the same architecture and adds three things: softmax cross-entropy on logits (the <code>from_logits=True</code> behaviour), Adam on the flat parameter vector, and mini-batches split across worker threads.</p>
+
+      <h3>The model</h3>
+      <pre><code>// Flatten(input_shape=(28, 28)) -&gt; 784 inputs
+// Dense(128, activation='relu')  -&gt; hidden layer, ReLU
+// Dense(10)                      -&gt; output logits (linear)
+int[] sizes = {FashionMNISTLoader.INPUT_SIZE, 128,
+               FashionMNISTLoader.NUM_CLASSES};          // {784, 128, 10}
+
+DenseClassifier model = new DenseClassifier(SEED, sizes,
+        new Adam(LEARNING_RATE));                         // lr = 0.001</code></pre>
+      <p><code>DenseClassifier</code> (<span class="path">src/main/java/layers/DenseClassifier.java</span>) stacks <code>layers.Dense</code> layers. Hidden layers use ReLU, the last layer is linear, and the loss is computed inside <code>backward(label)</code>. The class implements <code>TrainableClassifier</code>, which exposes parameters and gradients as flat arrays, so the optimizer and the trainer can work on them directly.</p>
+
+      <h3>Training with worker threads</h3>
+      <pre><code>try (DataParallelTrainer trainer = new DataParallelTrainer(model,
+        () -&gt; new DenseClassifier(SEED, sizes), threads)) {
+
+    for (int epoch = 1; epoch &lt;= epochs; epoch++) {
+        shuffle(order, random);                        // shuffle=True
+        double loss = trainer.trainEpoch(xTrain, yTrain, order,
+            trainCount, batchSize, LEARNING_RATE);     // mean training loss
+        // ... evaluate on the test set and print one row
+    }
+}</code></pre>
+      <p>Each mini-batch is split into contiguous shards, one per worker. Every worker has its own replica of the model, copies the current weights, and computes gradients for its shard. The gradients are summed in a fixed order and the master model applies one Adam step (see <a href="performance.html">Performance</a>, section 4).</p>
+
+      <h3>Measured on the development laptop</h3>
+      <table>
+        <tr><th>Run</th><th>Epoch time</th><th>Test accuracy after 10 epochs</th></tr>
+        <tr><td>60 000 images, batch 32, 4 threads</td><td>about 9 s</td><td>88.14%</td></tr>
+        <tr><td>60 000 images, batch 128, 4 threads</td><td>3.3–5.8 s</td><td>88.34%</td></tr>
+        <tr><td>10 000 images, batch 128, 4 threads</td><td>0.5–0.8 s</td><td>about 82% after 3 epochs</td></tr>
+      </table>
+      <p>Batch 128 is the default in the Maven configuration. Larger batches mean fewer Adam steps per epoch, so they usually need a larger learning rate to match the accuracy.</p>
+
+      <div class="note"><strong>Initialization differs from Keras.</strong> <code>Dense</code> uses He-normal initialization, while Keras <code>Dense</code> uses Glorot-uniform by default. Both are standard; results differ slightly.</div>
+
+      <h3>Run it</h3>
+      <pre><code># from projects/fashion-mnist, after mvn -B -q install -DskipTests in the repository root
+mvn compile exec:exec -DmainClass=FashionMnistKerasLike -DrunArgs=60000 -DcnnEpochs=10 -DbatchSize=128 -DtestLimit=10000</code></pre>
+
+      <div class="paging">
+        <a href="08-downloader-loader.html">← 08 · Downloader &amp; loader</a>
+        <a href="10-evaluation.html">10 · Evaluation &amp; confusion matrix →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>21 · API reference and documentation gaps — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html">02 · Forward pass</a>
+      <a href="03-backprop.html">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses &amp; optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html">08 · Downloader &amp; loader</a>
+      <a href="09-keras-like.html">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html">10 · Evaluation &amp; confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html">13 · Run it</a>
+      <a href="14-full-walkthrough.html">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html">16 · Classical machine learning</a>
+      <a href="17-autograd.html">17 · Autograd</a>
+      <a href="18-transformers.html">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html">20 · GPT</a>
+      <a href="21-api-reference.html" class="active">21 · API reference</a>
+      <a href="performance.html">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Chapter 21</div>
+    <article>
+      <div class="eyebrow">21 · API reference</div>
+      <h1>The whole API map, and what is still undocumented</h1>
+      <p class="lead">This chapter is the index to the source tree. It lists every package, says how deeply the book covers it, and records the gaps: classes that exist without a dedicated chapter, and capabilities that are absent rather than merely undocumented. Use it as a checklist when the code moves faster than the prose.</p>
+
+      <h2>21.1 Three documentation sets</h2>
+      <table>
+        <tr><th>Location</th><th>What it is</th><th>Status</th></tr>
+        <tr><td><code>newbook/</code></td><td>The current student guide, one HTML chapter per topic plus Markdown in <code>newbook/md/</code>.</td><td>Current. This is the reference to trust.</td></tr>
+        <tr><td><code>docs/</code></td><td>A formatted archive of three original text files: <code>first</code>, <code>docs</code> and <code>explanations</code>.</td><td>Historical. It describes early versions of the library.</td></tr>
+        <tr><td><code>README.md</code></td><td>Build commands, the two main APIs and a short feature tour.</td><td>Current summary; not a tutorial.</td></tr>
+        <tr><td><code>book/</code></td><td>An earlier eight-chapter map/reference set.</td><td>Superseded by <code>newbook/</code>.</td></tr>
+      </table>
+      <div class="warning"><strong>Known stale material.</strong> <code>docs/html/first.html</code> and <code>docs/txt/first.txt</code> show a <code>Neuron</code>/<code>Layer</code> design with a single learning rate and no activation or optimiser objects. That code no longer matches <code>layers.NeuralNetwork</code>. Treat those files as history, not API documentation.</div>
+
+      <h2>21.2 Coverage legend</h2>
+      <table>
+        <tr><th>Mark</th><th>Meaning</th></tr>
+        <tr><td><strong>Full</strong></td><td>A dedicated chapter explains the API, the math and a runnable example.</td></tr>
+        <tr><td><strong>Partial</strong></td><td>Used in a chapter or the README, but not every public method is described.</td></tr>
+        <tr><td><strong>Reference</strong></td><td>Listed here with a one-line purpose; no tutorial chapter yet.</td></tr>
+        <tr><td><strong>Gap</strong></td><td>No class exists for the capability, or the class exists but is not wired into a workflow.</td></tr>
+      </table>
+
+      <h2>21.3 Package map</h2>
+      <table>
+        <tr><th>Package</th><th>Files</th><th>Purpose</th><th>Coverage</th></tr>
+        <tr><td><code>activations</code></td><td>12</td><td>Sigmoid, tanh, ReLU family, ELU/SELU, GELU, Swish, Mish, softplus, softmax.</td><td>Partial — chapter 04 covers the core five.</td></tr>
+        <tr><td><code>autograd</code></td><td>2</td><td><code>Tensor</code> and differentiable <code>Ops</code>.</td><td>Full — chapter 17.</td></tr>
+        <tr><td><code>data</code></td><td>6</td><td>MNIST/Fashion-MNIST download and IDX loading, float scaling, splitting.</td><td>Full — chapters 07–08.</td></tr>
+        <tr><td><code>data.augmentation</code></td><td>1</td><td>Image augmentation for square float images.</td><td>Reference.</td></tr>
+        <tr><td><code>data.cv</code></td><td>2</td><td><code>KFold</code> and <code>StratifiedKFold</code>.</td><td>Reference.</td></tr>
+        <tr><td><code>data.encoding</code></td><td>2</td><td><code>LabelEncoder</code>, <code>MissingValueImputer</code> for float arrays.</td><td>Reference.</td></tr>
+        <tr><td><code>data.io</code></td><td>5</td><td>Streaming CSV, JSON Lines, missing-value helpers, Parquet facade.</td><td>Reference.</td></tr>
+        <tr><td><code>data.io.parquet</code></td><td>7</td><td>Pure-JDK flat numeric Parquet reader/writer, Thrift compact metadata, RLE.</td><td>Reference.</td></tr>
+        <tr><td><code>data.loaders</code></td><td>2</td><td><code>CsvLoader</code> and <code>JsonArrayLoader</code>.</td><td>Reference.</td></tr>
+        <tr><td><code>data.model</code></td><td>10</td><td>Safetensors, GGUF, ONNX initializers, weight-file abstraction, quantisation.</td><td>Reference.</td></tr>
+        <tr><td><code>data.pipeline</code></td><td>1</td><td>Shuffle, batch and map for <code>float[][]</code> datasets.</td><td>Reference.</td></tr>
+        <tr><td><code>data.scaling</code></td><td>2</td><td>Min-max and robust scaling for <code>float[][]</code>.</td><td>Reference.</td></tr>
+        <tr><td><code>data.text</code></td><td>1</td><td>Whitespace tokenizer with a vocabulary.</td><td>Reference.</td></tr>
+        <tr><td><code>evaluation</code></td><td>5</td><td>Accuracy/confusion/P/R/F1, regression metrics, AUC, HTML report, PNG encoding.</td><td>Partial — chapters 10–11 cover classification and reports.</td></tr>
+        <tr><td><code>evaluation.bootstrap</code></td><td>1</td><td>Bootstrap confidence intervals for a metric.</td><td>Reference.</td></tr>
+        <tr><td><code>evaluation.nlp</code></td><td>2</td><td>BLEU and ROUGE.</td><td>Reference.</td></tr>
+        <tr><td><code>examples</code></td><td>4</td><td>Fashion-MNIST, MNIST, classical-ML demo, dispatcher.</td><td>Partial — chapters 13–16.</td></tr>
+        <tr><td><code>hyperparam</code></td><td>1</td><td>Grid and random search spaces.</td><td>Reference.</td></tr>
+        <tr><td><code>initialization</code></td><td>1</td><td>Xavier uniform and He normal initialisers.</td><td>Partial — used in chapters 01 and 09.</td></tr>
+        <tr><td><code>layers</code></td><td>37</td><td>Dense network, convolutions, pooling, normalisation, dropout, recurrent cells, attention, sequential API, model I/O.</td><td>Partial — chapters 01–03 and 09 cover the dense core; CNN/RNN/attention layers are reference-only.</td></tr>
+        <tr><td><code>logging</code></td><td>1</td><td>CSV training logger.</td><td>Reference.</td></tr>
+        <tr><td><code>losses</code></td><td>9</td><td>MSE, BCE, cross-entropy, hinge, Huber, KL, MAE, Poisson, label smoothing.</td><td>Partial — chapter 05 covers the core losses.</td></tr>
+        <tr><td><code>ml</code></td><td>9</td><td>Frames, vectors, pipelines, estimators, clustering, splits.</td><td>Full — chapter 16.</td></tr>
+        <tr><td><code>ml.kernel</code></td><td>3</td><td>Linear and RBF kernels for the SVM.</td><td>Full — chapter 16.</td></tr>
+        <tr><td><code>ml.metrics</code></td><td>1</td><td>Accuracy, MSE and R² for the classical API.</td><td>Full — chapter 16.</td></tr>
+        <tr><td><code>ml.model</code></td><td>7</td><td>Linear/logistic regression, decision tree, random forest, SVM, k-means, shared validation.</td><td>Full — chapter 16.</td></tr>
+        <tr><td><code>ml.preprocessing</code></td><td>5</td><td>Imputer, one-hot encoder, standard and min-max scalers.</td><td>Full — chapter 16.</td></tr>
+        <tr><td><code>optim</code></td><td>12</td><td>SGD, momentum, NAG, Adam, AdamW, Nadam, RMSProp, Adagrad, clipping, noise, schedules.</td><td>Partial — chapter 05 covers SGD and Adam.</td></tr>
+        <tr><td><code>regularizers</code></td><td>3</td><td>L1, L2 and elastic-net penalties.</td><td>Reference.</td></tr>
+        <tr><td><code>training</code></td><td>4</td><td>Trainer configuration, gradient accumulation, data-parallel training, trainable-classifier abstraction.</td><td>Partial — chapter 06 covers <code>Trainer</code>.</td></tr>
+        <tr><td><code>training.callbacks</code></td><td>4</td><td>Early stopping, checkpointing, plateau scheduler, callback interface.</td><td>Gap — not invoked by <code>Trainer</code>.</td></tr>
+        <tr><td><code>transformers</code></td><td>8</td><td>Embedding, linear, layer norm, feed-forward, attention, blocks, encoder and decoder stacks.</td><td>Full — chapter 18; BERT and GPT gaps in 19–20.</td></tr>
+        <tr><td><code>util</code></td><td>3</td><td>Class weights, progress bar, seed manager.</td><td>Reference.</td></tr>
+        <tr><td><code>vector</code></td><td>1</td><td>Vector API dot, ReLU and scaled-add helpers.</td><td>Partial — chapter on performance.</td></tr>
+      </table>
+
+      <h2>21.4 Classes with no dedicated tutorial yet</h2>
+
+      <h3>Activations</h3>
+      <p>Chapter 04 documents sigmoid, tanh, ReLU, Leaky ReLU and linear. The package also contains <code>ELU</code>, <code>SELU</code>, <code>GELU</code>, <code>Swish</code>, <code>HardSwish</code>, <code>Mish</code>, <code>PReLU</code>, <code>ReLU6</code>, <code>Softplus</code> and <code>Softmax</code>, plus the <code>Activations</code> registry. Their derivatives exist; use them through <code>ActivationFunction</code> rather than calling the classes directly unless you need a parameterised activation such as <code>PReLU</code>.</p>
+
+      <h3>Layers beyond the dense core</h3>
+      <p>The following are implemented and tested but not taught step by step:</p>
+      <ul>
+        <li><strong>Convolution and pooling:</strong> <code>Conv2D</code>, <code>DilatedConv2D</code>, <code>SeparableConv2D</code>, <code>GroupedConv2D</code>, <code>TransposedConv2D</code>, <code>MaxPool2D</code>, <code>AvgPool2D</code>, <code>GlobalAvgPool2D</code>.</li>
+        <li><strong>Normalisation:</strong> <code>BatchNormalization</code>, <code>BatchNormLayer</code>, <code>LayerNorm</code>, <code>GroupNorm</code>, <code>InstanceNorm</code>.</li>
+        <li><strong>Sequence models:</strong> <code>RNN</code>, <code>LSTM</code>, <code>GRU</code>, <code>RecurrentCell</code>, <code>RecurrentStack</code>.</li>
+        <li><strong>Attention and residuals:</strong> <code>SelfAttention</code>, <code>MultiHeadAttention</code>, <code>ResidualBlock</code>, <code>Embedding</code>.</li>
+        <li><strong>High-level models:</strong> <code>DenseClassifier</code>, <code>ConvClassifier</code>, <code>Sequential</code>, <code>BatchPredictor</code>.</li>
+        <li><strong>Persistence:</strong> <code>ModelFormat</code>, <code>ModelLoader</code>, <code>ModelSummary</code>, <code>WeightImporter</code>.</li>
+      </ul>
+      <div class="note"><strong>Scope note.</strong> These classes are <code>double</code>-based and live inside the <code>NeuralNetwork</code> forward/backward contract. <code>WeightImporter</code> maps safetensors/GGUF/ONNX tensors into <code>layers.Dense</code>, <code>Conv2D</code>, <code>Embedding</code>, <code>LayerNorm</code>, recurrent cells and the two attention layers. It does not target <code>transformers.*</code>.</div>
+
+      <h3>Losses, optimisers, regularisers</h3>
+      <p><code>losses</code> adds <code>HingeLoss</code>, <code>HuberLoss</code>, <code>KLDivergenceLoss</code>, <code>CategoricalCrossEntropyLoss</code>, <code>MAELoss</code>, <code>PoissonLoss</code> and <code>LabelSmoothing</code> to the core MSE/BCE/cross-entropy set. <code>optim</code> adds <code>NAG</code>, <code>AdamW</code>, <code>Nadam</code>, <code>RMSProp</code>, <code>Adagrad</code>, <code>GradientClipper</code>, <code>GradientNoise</code>, <code>LearningRateSchedule</code> and the <code>Optimizers</code> registry. <code>regularizers</code> provides L1, L2 and elastic net. Only SGD and Adam are walked through in chapter 05; the others follow the same <code>Optimizer</code> interface.</p>
+
+      <h3>Data and model I/O</h3>
+      <p>These are working utilities rather than demos:</p>
+      <ul>
+        <li><code>CsvStreamReader</code>/<code>CsvStreamWriter</code>, <code>JsonLinesStream</code>, <code>CsvLoader</code>, <code>JsonArrayLoader</code>.</li>
+        <li><code>ParquetIO</code> and the pure-JDK <code>data.io.parquet</code> reader/writer. The supported profile is flat numeric columns; it is not a general Parquet implementation.</li>
+        <li><code>SafetensorsIO</code>, <code>GgufIO</code>, <code>OnnxIO</code>, <code>OnnxGraph</code>, <code>WeightFile</code> and <code>GgufQuant</code>. ONNX support reads graph metadata and initializers; it does not execute ONNX graphs.</li>
+        <li><code>data.text.Tokenizer</code> is a whitespace tokenizer, not BPE or WordPiece.</li>
+      </ul>
+
+      <h3>Evaluation, tuning and utilities</h3>
+      <p><code>ClassificationMetrics</code> (confusion matrix, per-class precision/recall/F1), <code>RegressionMetrics</code>, <code>AucMetrics</code>, <code>Bootstrap</code>, <code>BleuScore</code> and <code>RougeScore</code> are available. <code>GridSearch</code> builds parameter combinations and supports random search, but does not run training for you. <code>ClassWeights</code>, <code>ProgressBar</code>, <code>SeedManager</code> and <code>TrainingLogger</code> are small helpers.</p>
+
+      <h2>21.5 Capabilities that are absent, not just undocumented</h2>
+      <table>
+        <tr><th>Capability</th><th>Status</th><th>Closest existing piece</th></tr>
+        <tr><td>BERT model, WordPiece, MLM/NSP heads</td><td>Absent</td><td><code>TransformerEncoder</code>, chapter 19</td></tr>
+        <tr><td>GPT model, BPE, sampling, KV cache</td><td>Absent</td><td><code>TransformerDecoder</code>, chapter 20</td></tr>
+        <tr><td>Positional and segment embeddings</td><td>Absent</td><td>Add a second <code>Embedding</code> (chapter 19)</td></tr>
+        <tr><td>Autograd optimiser bridge</td><td>Absent</td><td>Manual SGD loop (chapter 17); <code>optim.*</code> targets <code>NeuralNetwork</code></td></tr>
+        <tr><td>Dropout / masking inside transformers</td><td>Absent</td><td>No dropout or padding mask in <code>transformers.*</code></td></tr>
+        <tr><td>Cross-attention encoder–decoder</td><td>Absent</td><td><code>TransformerBlock</code> is self-attention only</td></tr>
+        <tr><td>Callback-driven training</td><td>Not wired</td><td>Callback classes exist; <code>Trainer</code> ignores them</td></tr>
+        <tr><td>ONNX graph execution</td><td>Absent</td><td><code>OnnxIO</code> reads initializers and graph metadata only</td></tr>
+        <tr><td>Pretrained transformer weights</td><td>Not mapped</td><td><code>SafetensorsIO</code>/<code>GgufIO</code> can read files; no <code>transformers.*</code> mapping</td></tr>
+        <tr><td>GPU or mixed precision</td><td>Absent</td><td>CPU float32 only</td></tr>
+        <tr><td>General-purpose Parquet (strings, nesting, all codecs)</td><td>Limited</td><td><code>ParquetIO</code> supports flat numeric columns</td></tr>
+        <tr><td>Classical-ML model persistence</td><td>Absent</td><td><code>ml</code> models have no save/load methods</td></tr>
+        <tr><td>Feature importance for linear models</td><td>Absent</td><td>Coefficients are exposed; no ranking helper</td></tr>
+        <tr><td>Probability calibration</td><td>Absent</td><td>Sigmoid outputs from logistic/SVM are uncalibrated</td></tr>
+      </table>
+
+      <h2>21.6 Documentation debt, ranked</h2>
+      <ol>
+        <li><strong>Update the archived introduction.</strong> <code>docs/html/*.html</code> and <code>docs/txt/*.txt</code> still describe the original four-class design. A banner pointing to <code>newbook/</code> now exists, but the listings themselves are historical.</li>
+        <li><strong>Write a CNN chapter.</strong> <code>Conv2D</code>, pooling, <code>ConvClassifier</code> and <code>WeightImporter</code> are substantial and currently only reference-level.</li>
+        <li><strong>Write a recurrent chapter.</strong> <code>RNN</code>, <code>LSTM</code>, <code>GRU</code> and <code>RecurrentStack</code> have tests but no walkthrough.</li>
+        <li><strong>Document the optimiser family.</strong> One page comparing SGD, momentum, NAG, Adam, AdamW, Nadam, RMSProp and Adagrad, including when each helps.</li>
+        <li><strong>Document data I/O.</strong> CSV/JSONL/Parquet/Safetensors/GGUF/ONNX with small round-trip examples.</li>
+        <li><strong>Wire the callbacks.</strong> Either integrate <code>training.callbacks</code> into <code>Trainer</code> or state clearly that they are standalone building blocks.</li>
+        <li><strong>Document evaluation beyond accuracy.</strong> AUC, bootstrap intervals, BLEU/ROUGE and the regression metrics.</li>
+        <li><strong>Add a migration page.</strong> Map the names in <code>docs/</code> (<code>Neuron</code>, <code>Layer</code>, single learning rate) to the current API.</li>
+      </ol>
+
+      <h2>21.7 Build and run reference</h2>
+      <pre><code># compile and test (enables the incubating Vector API)
+mvn clean test
+
+# run all tests quietly
+mvn -q test
+
+# Fashion-MNIST demo (default)
+mvn exec:exec
+
+# dispatcher: fashion | mnist | ml
+java --add-modules jdk.incubator.vector -cp target/classes examples.Main ml
+
+# classical-ML demo directly
+java --add-modules jdk.incubator.vector -cp target/classes examples.ClassicalMlDemo</code></pre>
+      <p>Tests are under <code>src/test/java</code>; the classical-ML suites are <code>ml.DataFrameTest</code>, <code>ml.PreprocessingTest</code>, <code>ml.SupervisedModelsTest</code> and <code>ml.KMeansTest</code>. The <code>autograd</code> and <code>transformers</code> packages compile but currently have no dedicated unit tests; they are documented from the source contracts in chapters 17–20.</p>
+
+      <div class="note"><strong>Keeping this page honest.</strong> When a new package or public class lands, add it to the package map and either write a chapter or mark it Reference. The map is deliberately one table so drift is easy to spot.</div>
+
+      <div class="paging">
+        <a href="20-gpt.html">← 20 · GPT</a>
+        <a href="index.html">Start here →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

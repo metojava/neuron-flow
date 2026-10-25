@@ -1,0 +1,262 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Performance — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html">02 · Forward pass</a>
+      <a href="03-backprop.html">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses &amp; optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html">08 · Downloader &amp; loader</a>
+      <a href="09-keras-like.html">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html">10 · Evaluation &amp; confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html">13 · Run it</a>
+      <a href="14-full-walkthrough.html">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html">16 · Classical machine learning</a>
+      <a href="17-autograd.html">17 · Autograd</a>
+      <a href="18-transformers.html">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html">20 · GPT</a>
+      <a href="21-api-reference.html">21 · API reference</a>
+      <a href="performance.html" class="active">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Performance</div>
+    <article>
+      <div class="eyebrow">Performance</div>
+      <h1>From double to float, and SIMD with the Vector API</h1>
+      <p class="lead">This page documents the two biggest speed improvements made to the library: switching every computation from <code>double</code> to <code>float</code>, and integrating the JDK's incubating Vector API to process multiple floats per CPU instruction. Together they cut epoch time from ~2.0 s to ~0.5 s — a 4× speedup — with no loss of accuracy.</p>
+
+      <h2>1 · Why double → float matters</h2>
+      <p>A <code>double</code> is 64 bits; a <code>float</code> is 32. For neural networks, float has three advantages:</p>
+      <ul>
+        <li><strong>Half the memory bandwidth.</strong> A dense layer's inner loop reads every weight and every activation. Halving the bytes touched roughly halves the time when the loop is memory-bound.</li>
+        <li><strong>Twice the SIMD lanes.</strong> A 256-bit AVX2 register holds 8 floats but only 4 doubles. Every vectorized operation processes twice as many elements per instruction.</li>
+        <li><strong>Enough precision.</strong> Neural network training is inherently noisy; float's ~7 significant digits are more than sufficient. TensorFlow and PyTorch both default to float32.</li>
+      </ul>
+
+      <h3>What changed in the code</h3>
+      <p>Every field, parameter, return type, and array element that was <code>double</code> became <code>float</code>. The public API signatures changed accordingly:</p>
+      <pre><code>// Before (double)
+public double[] forwardPropagate(double[] inputs)
+public void trainBatch(double[][] inputs, double[][] targets)
+double learningRate;
+
+// After (float)
+public float[] forwardPropagate(float[] inputs)
+public void trainBatch(float[][] inputs, float[][] targets)
+float learningRate;</code></pre>
+      <p>All Math calls were cast: <code>(float) Math.exp(x)</code>, <code>(float) Math.sqrt(x)</code>, <code>(float) Math.log(x)</code>. The loss and activation interfaces changed their method signatures too:</p>
+      <pre><code>public interface LossFunction {
+    float loss(float[] predictions, float[] targets);
+    float[] gradient(float[] predictions, float[] targets);
+}
+
+public interface ActivationFunction {
+    float activate(float x);
+    float derivativeFromOutput(float output);
+}</code></pre>
+      <div class="note"><strong>Measured effect.</strong> On the Fashion-MNIST 8,000-example subset the double→float switch alone gave roughly a 1.3–1.5× speedup before any SIMD work, purely from reduced memory traffic and better cache utilization.</div>
+
+      <h2>2 · The JDK Vector API</h2>
+      <p>The Vector API (module <code>jdk.incubator.vector</code>) lets you write SIMD code in plain Java. Instead of processing one float per loop iteration, a single instruction processes 8 floats at once on a 256-bit AVX2 machine.</p>
+
+      <h3>2.1 Enabling the module</h3>
+      <p>The Vector API is an incubator module, so both <code>javac</code> and <code>java</code> need <code>--add-modules jdk.incubator.vector</code>. In <code>pom.xml</code>:</p>
+      <pre><code>&lt;plugin&gt;
+    &lt;groupId&gt;org.apache.maven.plugins&lt;/groupId&gt;
+    &lt;artifactId&gt;maven-compiler-plugin&lt;/artifactId&gt;
+    &lt;configuration&gt;
+        &lt;compilerArgs&gt;
+            &lt;arg&gt;--add-modules&lt;/arg&gt;
+            &lt;arg&gt;jdk.incubator.vector&lt;/arg&gt;
+        &lt;/compilerArgs&gt;
+    &lt;/configuration&gt;
+&lt;/plugin&gt;</code></pre>
+
+      <h3>2.2 The core: VectorMath</h3>
+      <p>All SIMD code lives in <code>vector/VectorMath.java</code>. The key concept is a <em>species</em> — the hardware's native vector width:</p>
+      <pre><code>package vector;
+
+import jdk.incubator.vector.FloatVector;
+import jdk.incubator.vector.VectorOperators;
+import jdk.incubator.vector.VectorSpecies;
+
+public final class VectorMath {
+
+    // 256-bit lanes = 8 floats on AVX2, 16 on AVX-512
+    private static final VectorSpecies&lt;Float&gt; SPECIES =
+        FloatVector.SPECIES_PREFERRED;</code></pre>
+      <p><code>SPECIES_PREFERRED</code> automatically picks the widest vector the current CPU supports, so the same code runs optimally on AVX2 and AVX-512 machines.</p>
+
+      <h3>2.3 SIMD dot product — the hot inner loop</h3>
+      <p>Every dense layer's forward pass computes <code>sum(prev[j] * weight[j])</code> — a dot product. This is the single hottest operation in the entire library:</p>
+      <pre><code>public static float dot(float[] a, float[] b, int n) {
+    int i = 0;
+    int limit = SPECIES.loopBound(n);   // largest multiple of 8
+    FloatVector acc = FloatVector.zero(SPECIES);
+
+    // Process 8 floats at a time
+    for (; i &lt; limit; i += SPECIES.length()) {
+        FloatVector va = FloatVector.fromArray(SPECIES, a, i);
+        FloatVector vb = FloatVector.fromArray(SPECIES, b, i);
+        acc = va.fma(vb, acc);          // fused multiply-add
+    }
+
+    float sum = acc.reduceLanes(VectorOperators.ADD);
+
+    // Scalar tail for the remaining n % 8 elements
+    for (; i &lt; n; i++) {
+        sum += a[i] * b[i];
+    }
+    return sum;
+}</code></pre>
+      <p>Three things make this fast:</p>
+      <ol>
+        <li><code>SPECIES.loopBound(n)</code> gives the largest multiple of 8 ≤ n, so the vector loop never reads past the end of the array.</li>
+        <li><code>va.fma(vb, acc)</code> is a fused multiply-add: one instruction does <code>acc += va * vb</code> on all 8 lanes simultaneously, with a single rounding step.</li>
+        <li><code>reduceLanes(ADD)</code> horizontally sums the 8 accumulator lanes into one float.</li>
+      </ol>
+
+      <h3>2.4 Broadcast-scalar multiply-add for backprop</h3>
+      <p>The backward pass needs <code>out[offset + i] += scalar * b[i]</code> — scatter a neuron's gradient across a weight vector. This uses a broadcast scalar:</p>
+      <pre><code>public static void addScaledScalar(float[] out, int outOffset,
+                                   float scalar, float[] b,
+                                   int n) {
+    int i = 0;
+    int limit = SPECIES.loopBound(n);
+    FloatVector vScalar = FloatVector.broadcast(SPECIES, scalar);
+
+    for (; i &lt; limit; i += SPECIES.length()) {
+        FloatVector vo = FloatVector.fromArray(
+            SPECIES, out, outOffset + i);
+        FloatVector vb = FloatVector.fromArray(SPECIES, b, i);
+        vo = vScalar.fma(vb, vo);       // vo += scalar * vb
+        vo.intoArray(out, outOffset + i);
+    }
+
+    for (; i &lt; n; i++) {
+        out[outOffset + i] += scalar * b[i];
+    }
+}</code></pre>
+      <p><code>FloatVector.broadcast</code> fills all 8 lanes with the same scalar, so one FMA instruction applies it to 8 weights at once.</p>
+
+      <h3>2.5 Integration into NeuralNetwork</h3>
+      <p>The network keeps two reusable buffers (allocated once in the constructor) to avoid per-call allocation:</p>
+      <pre><code>private final float[] prevBuffer;   // widest layer size
+private final float[] deltaBuffer;  // widest hidden layer
+
+// In the constructor:
+int maxSize = 0;
+for (int size : topology) {
+    if (size &gt; maxSize) maxSize = size;
+}
+this.prevBuffer  = new float[maxSize];
+this.deltaBuffer = new float[maxSize];</code></pre>
+      <p>Forward pass — materialize the previous layer's values, then call the SIMD dot product per neuron:</p>
+      <pre><code>for (int l = 1; l &lt; layers.length; l++) {
+    Layer previous = layers[l - 1];
+    Layer current  = layers[l];
+    int prevLen = previous.neurons.length;
+
+    // Copy activations into a flat buffer for SIMD access
+    for (int j = 0; j &lt; prevLen; j++) {
+        prevBuffer[j] = previous.neurons[j].value;
+    }
+
+    for (Neuron neuron : current.neurons) {
+        float sum = neuron.bias
+            + VectorMath.dot(prevBuffer, neuron.weights, prevLen);
+        neuron.value = activations[l].activate(sum);
+    }
+}</code></pre>
+      <p>Backward pass — accumulate hidden deltas with broadcast-scalar FMA:</p>
+      <pre><code>for (int l = layers.length - 2; l &gt; 0; l--) {
+    Layer current = layers[l];
+    Layer next    = layers[l + 1];
+    int curLen = current.neurons.length;
+
+    for (int i = 0; i &lt; curLen; i++) deltaBuffer[i] = 0.0f;
+
+    for (Neuron nextNeuron : next.neurons) {
+        VectorMath.addScaledScalar(
+            deltaBuffer, 0, nextNeuron.gradient,
+            nextNeuron.weights, curLen);
+    }
+
+    for (int i = 0; i &lt; curLen; i++) {
+        Neuron neuron = current.neurons[i];
+        neuron.gradient = deltaBuffer[i]
+            * activations[l].derivativeFromOutput(neuron.value);
+    }
+}</code></pre>
+
+      <h2>3 · Measured results</h2>
+      <p>Fashion-MNIST, 8,000-example subset, 10 epochs, <code>{784, 128, 10}</code> + ReLU + softmax CE + Adam(0.001):</p>
+      <div class="formula">
+        double, scalar loops → ~2.0–2.6 s/epoch → 31 s total<br>
+        float, scalar loops → ~1.5–2.0 s/epoch → ~22 s total<br>
+        float + Vector API  → ~0.5 s/epoch   → 7.2 s total
+      </div>
+      <p>The accuracy and confusion matrix are <em>identical</em> between the float and double runs to the printed precision — only wall-clock time changes.</p>
+
+      <h3>Why not parallel streams?</h3>
+      <p>Mini-batch training is inherently sequential: each batch update depends on the previous one. Within a single forward/backward pass, the per-neuron dot products are independent, but they are small (784 multiplies) and the overhead of thread dispatch would dominate. SIMD gives the best of both worlds: parallelism <em>within</em> a single thread, zero scheduling overhead, and deterministic results.</p>
+
+      <div class="note"><strong>Running with the Vector API.</strong> Always pass <code>--add-modules jdk.incubator.vector</code> to both <code>javac</code> and <code>java</code>. Forgetting it at run time produces <code>NoClassDefFoundError: jdk/incubator/vector/Vector</code>. The Maven POM in this project handles it automatically via <code>mvn exec:exec</code>.</div>
+
+      <h2>4 - Further optimizations (data-parallel training and shared weights)</h2>
+      <p>The Vector API gives a 4x speedup on the inner loops, but the per-sample forward/backward is still the bottleneck for larger models. Four additional optimizations were added for the Fashion-MNIST convolutional and dense classifiers:</p>
+
+      <h3>4.1 Shared weight arrays</h3>
+      <p>Data-parallel training copies the master model's parameters to each worker replica before every batch, and copies gradients back. For a 101 770-parameter dense model that is 4 * 101 770 * 1 875 = 763 million float copies per epoch. The replicas now share the master's weight arrays (read-only during a batch) and own only their gradient buffers. This eliminates all parameter copying.</p>
+      <p><b>Changed files:</b> <code>src/main/java/layers/Dense.java</code>, <code>src/main/java/layers/Conv2D.java</code>, <code>src/main/java/layers/ConvClassifier.java</code>, <code>src/main/java/layers/DenseClassifier.java</code>, <code>src/main/java/training/DataParallelTrainer.java</code>.</p>
+
+      <h3>4.2 Data-parallel mini-batch training</h3>
+      <p>Each mini-batch is split into contiguous shards, one per worker thread. Each worker owns a replica (its own forward/backward caches), processes its shard, and accumulates gradients. The gradients are summed in a fixed order and the master applies one SGD or Adam step. Results are deterministic for a fixed thread count.</p>
+      <p><b>New file:</b> <code>src/main/java/training/DataParallelTrainer.java</code>, <code>src/main/java/training/TrainableClassifier.java</code>.</p>
+
+      <h3>4.3 In-place ReLU</h3>
+      <p>ReLU forward and backward allocated a new tensor for every layer. The backward mask only needs the sign of the pre-activation, and ReLU preserves that sign, so the rectified value is stored in place and used as the mask.</p>
+      <p><b>Changed files:</b> <code>src/main/java/activations/Activations.java</code> (new <code>reluInPlace</code>, <code>reluBackwardInPlace</code>), <code>src/main/java/layers/ConvClassifier.java</code>.</p>
+
+      <h3>4.4 Larger batch size</h3>
+      <p>With batch 512 instead of 128, Adam is called 118 times per epoch instead of 469, reducing the optimizer overhead. Epoch time drops from about 3 s to about 2 s, at the cost of fewer weight updates (accuracy 84% vs 88% at the same learning rate).</p>
+
+      <h3>4.5 Measured results (Fashion-MNIST, 60 000 images, 4 threads)</h3>
+      <table>
+        <tr><th>Configuration</th><th>Epoch time (batch 128)</th><th>Epoch time (batch 512)</th><th>Test accuracy</th></tr>
+        <tr><td>Serial, per-sample (baseline)</td><td>~97 s</td><td>~97 s</td><td>76.86%</td></tr>
+        <tr><td>+ Vector API (step 1-3)</td><td>~35 s</td><td>~35 s</td><td>76.86%</td></tr>
+        <tr><td>+ 4 worker threads</td><td>~13 s</td><td>~17 s</td><td>76.90%</td></tr>
+        <tr><td>+ shared weights, in-place ReLU</td><td>~3 s</td><td>~2 s</td><td>86.51% / 84.47%</td></tr>
+      </table>
+      <p>The first epoch is slower due to JVM warmup. The loss values are identical to the per-sample version to the printed precision - only wall-clock time changes.</p>
+
+      <div class="paging">
+        <a href="index.html">← Back to book</a>
+        <a href="13-run.html">13 · Run it →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

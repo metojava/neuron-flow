@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>20 · GPT — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html">02 · Forward pass</a>
+      <a href="03-backprop.html">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses & optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html">08 · Downloader & loader</a>
+      <a href="09-keras-like.html">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html">10 · Evaluation & confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html">13 · Run it</a>
+      <a href="14-full-walkthrough.html">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html">16 · Classical machine learning</a>
+      <a href="17-autograd.html">17 · Autograd</a>
+      <a href="18-transformers.html">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html" class="active">20 · GPT</a>
+      <a href="21-api-reference.html">21 · API reference</a>
+      <a href="22-training.html">22 · Training infrastructure</a>
+      <a href="23-generation.html">23 · Generation</a>
+      <a href="24-serialization.html">24 · Serialization</a>
+      <a href="25-mixed-precision.html">25 · Mixed precision</a>
+      <a href="26-ddp.html">26 · Distributed training</a>
+      <a href="27-export.html">27 · Export</a>
+      <a href="performance.html">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Chapter 20</div>
+    <article>
+      <div class="eyebrow">20 · GPT</div>
+      <h1>Decoder-only language models with full generation pipeline</h1>
+      <p class="lead">NeuronFlow now provides a complete GPT implementation with <code>GPTModel</code>, <code>GPTLMHeadModel</code>, <code>BeamSearchDecoder</code>, and a full generation pipeline including KV cache, top-p/top-k sampling, temperature, repetition penalty, and stop sequences.</p>
+
+      <h2>20.1 Status: Complete generation pipeline</h2>
+      <div class="note"><strong>Fully implemented.</strong> All core GPT components are available: learned positional embeddings, decoder stack with causal masking, LM head with weight tying, KV cache for efficient generation, top-p/top-k sampling, temperature, repetition penalty, stop sequences, beam search, and GPT-2 style initialization.</div>
+      <table>
+        <tr><th>GPT component</th><th>NeuronFlow equivalent</th><th>Status</th></tr>
+        <tr><td>Token embedding</td><td><code>transformers.Embedding</code></td><td>Available</td></tr>
+        <tr><td>Position embeddings</td><td><code>transformers.Embedding</code> (learned) + <code>GPTModel.positionEmbedding</code></td><td>Available</td></tr>
+        <tr><td>Causal self-attention</td><td><code>transformers.MultiHeadAttention</code> with causal mask</td><td>Available</td></tr>
+        <tr><td>Decoder stack</td><td><code>transformers.GPTModel</code> / <code>TransformerDecoder</code></td><td>Available</td></tr>
+        <tr><td>LM head</td><td><code>transformers.Linear</code> + <code>GPTLMHeadModel</code></td><td>Available (weight tying)</td></tr>
+        <tr><td>Position embeddings</td><td>Learned positional embeddings</td><td>Available</td></tr>
+        <tr><td>BPE tokenizer</td><td><code>transformers.Tokenizer</code> (tiktoken-compatible)</td><td>Available</td></tr>
+        <tr><td>Sampling utilities</td><td><code>GPTLMHeadModel.generate()</code></td><td>Available (temp, top-k, top-p, repetition penalty, stop tokens)</td></tr>
+        <tr><td>KV cache</td><td><code>TransformerDecoder</code> + <code>TransformerBlock</code></td><td>Available</td></tr>
+        <tr><td>Weight tying</td><td><code>Linear.tieWeights()</code> + shared-weight constructor</td><td>Available</td></tr>
+        <tr><td>Dropout</td><td><code>MultiHeadAttention</code> + <code>TransformerBlock</code></td><td>Available</td></tr>
+        <tr><td>Pretrained weights</td><td><code>SafetensorsLoader</code> + <code>HFWeightLoader</code></td><td>Available (GPT-2 key mapping)</td></tr>
+        <tr><td>Mixed precision</td><td><code>MixedPrecisionContext</code></td><td>Available</td></tr>
+        <tr><td>KV cache generation</td><td><code>GPTLMHeadModel.generate()</code></td><td>Available</td></tr>
+        <tr><td>Beam search</td><td><code>BeamSearchDecoder</code></td><td>Available</td></tr>
+        <tr><td>Beam search</td><td><code>BeamSearchDecoder</code></td><td>Available</td></tr>
+        <tr><td>Top-p / top-k / temperature</td><td><code>GPTLMHeadModel.generate()</code></td><td>Available</td></tr>
+        <tr><td>Repetition penalty</td><td><code>GPTLMHeadModel.generate()</code></td><td>Available</td></tr>
+        <tr><td>Stop sequences</td><td><code>GPTLMHeadModel.generate()</code></td><td>Available</td></tr>
+        <tr><td>Beam search</td><td><code>BeamSearchDecoder</code></td><td>Available</td></tr>
+        <tr><td>Temperature / top-k / top-p</td><td><code>GPTLMHeadModel.generate()</code></td><td>Available</td></tr>
+        <tr><td>Repetition penalty</td><td><code>GPTLMHeadModel.generate()</code></td><td>Available</td></tr>
+        <tr><td>Stop sequences</td><td><code>GPTLMHeadModel.generate()</code></td><td>Available</td></tr>
+      </table>
+
+      <h2>20.1 Complete GPT model</h2>
+      <p><code>GPTModel</code> provides the decoder backbone with learned positional embeddings (not RoPE by default). Construct from <code>GPTConfig</code> or individual parameters.</p>
+      <pre><code>GPTConfig config = GPTConfig.gpt2Small(); // 12 layers, 768 hidden, 12 heads
+config.hiddenSize = 768;
+config.numHiddenLayers = 12;
+config.numAttentionHeads = 12;
+config.intermediateSize = 3072;
+config.vocabSize = 50257;
+config.maxPositionEmbeddings = 1024;
+
+GPTModel gpt = new GPTModel(config, 42L);
+
+// Forward pass with optional KV cache
+Tensor hidden = gpt.forward(inputIds, batchSize, seqLen, pastK, pastV, pastLen);
+Tensor logits = lmHead.forward(hidden);  // {B, T, V}</code></pre>
+
+      <h2>20.2 Language Model Head</h2>
+      <p><code>GPTLMHeadModel</code> wraps <code>GPTModel</code> with a tied LM head and provides the complete generation pipeline.</      <pre><code>GPTConfig config = GPTConfig.gpt2Small();
+config.hiddenSize = 768;
+config.numHiddenLayers = 12;
+config.numAttentionHeads = 12;
+config.vocabSize = 50257;
+config.maxPositionEmbeddings = 1024;
+
+GPTLMHeadModel gpt = new GPTLMHeadModel(config, 42L);
+
+// Forward pass (training)
+Tensor logits = gpt.forward(inputIds, batchSize, seqLen);
+
+// Generation with full pipeline
+int[] promptIds = tokenizer.encode("The quick brown fox");
+int[] generated = gpt.generate(
+    promptIds,           // initial tokens
+    100,                 // maxNewTokens
+    0.8f,                // temperature
+    40,                  // topK
+    0.9f,                // topP
+    1.1f,                // repetitionPenalty
+    new int[]{50256},    // stopTokenIds (EOS)
+    123L                 // seed
+);
+
+String text = tokenizer.decode(generated);</code></pre>
+
+      <h2>20.2 Generation features</h2>
+      <p><code>GPTLMHeadModel.generate()</code> supports a complete generation pipeline:</p>
+      <ul>
+        <li><strong>KV cache:</strong> Efficient autoregressive generation without recomputing the prefix at each step.</li>
+        <li><strong>Temperature sampling:</strong> <code>temperature=0</code> for greedy, >0 for sampling.</li>
+        <li><strong>Top-K filtering:</strong> Keep only top-K logits (e.g., <code>topK=40</code>).</li>
+        <li><strong>Top-P (nucleus) sampling:</strong> Keep smallest set of tokens with cumulative probability ≥ <code>topP</code> (e.g., <code>topP=0.9</code>).</li>
+        <li><strong>Repetition penalty:</strong> Penalizes repeated tokens (from CTRL paper). <code>penalty=1.0</code> disables, >1.0 penalizes.</li>
+        <li><strong>Stop sequences:</strong> Stop generation when any token in <code>stopTokenIds</code> is generated (e.g., EOS token).</li>
+        <li><strong>Temperature + top-p + top-k:</strong> All three can be combined; top-K applied first, then top-P, then temperature scaling.</li>
+      </ul>
+
+      <h2>20.3 Beam Search Decoding</h2>
+      <p><code>BeamSearchDecoder</code> implements beam search with length penalty.</p>
+      <pre><code>BeamSearchDecoder decoder = new BeamSearchDecoder(gptModel, 5); // beam size = 5
+int[] generated = decoder.generate(promptIds, 50, 0.6f); // maxNewTokens=50, lengthPenalty=0.6</code></pre>
+      <p>Features:</p>
+      <ul>
+        <li>Maintains top-<code>beamSize</code> candidates at each step.</li>
+        <li>Length penalty: <code>score / length^alpha</code> (default alpha=0.6).</li>
+        <li>KV cache shared across beams for efficiency.</li>
+        <li>Early stopping when all beams generate EOS token.</li>
+      </ul>
+
+      <h2>20.3 Beam Search Decoding</h2>
+      <p><code>BeamSearchDecoder</code> implements beam search with length penalty.</p>
+      <pre><code>BeamSearchDecoder decoder = new BeamSearchDecoder(gptModel, 5); // beam size = 5
+int[] generated = decoder.generate(promptIds, 50, 0.6f); // maxNewTokens=50, lengthPenalty=0.6</code></pre>
+      <p>Features:</p>
+      <ul>
+        <li>Maintains top-<code>beamSize</code> candidates at each step.</li>
+        <li>Length penalty: <code>score / length^alpha</code> (default alpha=0.6).</li>
+        <li>KV cache shared across beams for efficiency.</li>
+        <li>Early stopping when all beams generate EOS token.</li>
+      </ul>
+
+      <h2>20.4 Perplexity Evaluation</h2>
+      <p><code>PerplexityEvaluator</code> computes perplexity on a dataset.</p>
+      <pre><code>PerplexityEvaluator evaluator = new PerplexityEvaluator(gptModel);
+PerplexityEvaluator.PerplexityResult result = evaluator.evaluate(dataProvider);
+
+System.out.println(result); 
+// Perplexity: 15.23 | Avg NLL: 2.72 | Tokens: 50000 | Batches: 100</code></pre>
+
+      <h2>20.4 Configuration</h2>
+      <p>Use <code>GPTConfig</code> for all parameters. Predefined configurations available:</p>
+      <pre><code>GPTConfig config = GPTConfig.gpt2Small();   // 124M params: 12 layers, 768 hidden, 12 heads
+GPTConfig config = GPTConfig.gpt2Medium();  // 350M params: 24 layers, 1024 hidden, 16 heads
+GPTConfig config = GPTConfig.gpt2Large();   // 774M params: 36 layers, 1280 hidden, 20 heads
+GPTConfig config = GPTConfig.gpt2XLarge();  // 1.5B params: 48 layers, 1600 hidden, 25 heads
+
+// Custom config
+GPTConfig config = GPTConfig.of(50257, 768, 12, 12, 3072, 1024);</code></pre>
+      <p>GPT-2 specific fields in <code>GPTConfig</code> (HF-compatible aliases):</p>
+      <table>
+        <tr><th>Field</th><th>GPT-2 name</th><th>Description</th></tr>
+        <tr><td><code>nPositions</code></td><td><code>n_positions</code></td><td>Maximum sequence length</td></tr>
+        <tr><td><code>nEmbedd</code></td><td><code>n_embd</code></td><td>Model dimension (<code>hiddenSize</code>)</td></tr>
+        <tr><td><code>nLayer</code></td><td><code>n_layer</code></td><td>Number of layers</td></tr>
+        <tr><td><code>nHead</code></td><td><code>n_head</code></td><td>Number of attention heads</td></tr>
+        <tr><td><code>nInner</code></td><td><code>n_inner</code></td><td>FFN hidden size</td></tr>
+        <tr><td><code>residPdrop</code></td><td><code>resid_pdrop</code></td><td>Residual dropout rate</td></tr>
+        <tr><td><code>embdPdrop</code></td><td><code>embd_pdrop</code></td><td>Embedding dropout rate</td></tr>
+        <tr><td><code>attnPdrop</code></td><td><code>attn_pdrop</code></td><td>Attention dropout rate</td></tr>
+        <tr><td><code>layerNormEpsilon</code></td><td><code>layer_norm_epsilon</code></td><td>LayerNorm epsilon</td></tr>
+      </table>
+
+      <h2>20.5 Loading Pretrained GPT-2 Weights</h2>
+      <p>Use <code>HFWeightLoader</code> with GPT-2 key mapping:</p>
+      <pre><code>GPTConfig config = GPTConfig.gpt2Small();
+GPTLMHeadModel model = new GPTLMHeadModel(config, 42L);
+
+HFWeightLoader.loadWeights(model, Paths.get("pytorch_model.safetensors"), "gpt2");</code></pre>
+      <p>Maps HF GPT-2 keys (e.g., <code>h.0.attn.c_attn.weight</code>) to NeuronFlow parameter names. Supports GPT-2 small/medium/large/XL configurations.</      <h2>20.6 What GPT still needs</h2>
+      <table>
+        <tr><th>Component</th><th>Status</th><th>Notes</th></tr>
+        <tr><td>Token embedding</td><td>Available</td><td><code>transformers.Embedding</code></td></tr>
+        <tr><td>Causal self-attention</td><td>Available</td><td><code>-1e9</code> mask above the diagonal</td></tr>
+        <tr><td>Decoder stack</td><td>Available</td><td><code>TransformerDecoder</code></td></tr>
+        <tr><td>LM head</td><td>Available</td><td><code>Linear(D,V)</code>, weight tying via <code>tieWeights()</code></td></tr>
+        <tr><td>Position embeddings</td><td>Available</td><td>Learned positional embeddings in <code>GPTModel</code></td></tr>
+        <tr><td>BPE tokenizer</td><td>Available</td><td><code>transformers.Tokenizer</code> (tiktoken-compatible)</td></tr>
+        <tr><td>Sampling utilities</td><td>Available</td><td>Temperature, top-k, top-p, repetition penalty, stop sequences</td></tr>
+        <tr><td>KV cache</td><td>Available</td><td><code>TransformerDecoder</code> + <code>TransformerBlock</code></td></tr>
+        <tr><td>Weight tying</td><td>Available</td><td><code>Linear.tieWeights()</code> + shared-weight constructor</td></tr>
+        <tr><td>Dropout</td><td>Available</td><td><code>MultiHeadAttention</code> + <code>TransformerBlock</code></td></tr>
+        <tr><td>Pretrained weights</td><td>Available</td><td><code>SafetensorsLoader</code> + <code>HFWeightLoader</code></td></tr>
+        <tr><td>Mixed precision</td><td>Available</td><td><code>MixedPrecisionContext</code> with dynamic loss scaling</td></tr>
+        <tr><td>Beam search</td><td>Available</td><td><code>BeamSearchDecoder</code> with length penalty</td></tr>
+        <tr><td>Top-p / top-k / temperature</td><td>Available</td><td><code>GPTLMHeadModel.generate()</code></td></tr>
+        <tr><td>Repetition penalty</td><td>Available</td><td><code>GPTLMHeadModel.generate()</code></td></tr>
+        <tr><td>Stop sequences</td><td>Available</td><td><code>GPTLMHeadModel.generate()</code></td></tr>
+        <tr><td>Beam search</td><td>Available</td><td><code>BeamSearchDecoder</code> with length penalty</td></tr>
+        <tr><td>Perplexity evaluation</td><td>Available</td><td><code>PerplexityEvaluator</code></td></tr>
+        <tr><td>Mixed precision</td><td>Available</td><td><code>MixedPrecisionContext</code> with dynamic loss scaling</td></tr>
+      </table>
+
+      <h2>20.6 What GPT still needs</h2>
+      <table>
+        <tr><th>Component</th><th>Status</th><th>Notes</th></tr>
+        <tr><td>Flash attention</td><td>Missing</td><td>Vector API support pending; no fused kernel</td></tr>
+        <tr><td>Gradient checkpointing</td><td>Missing</td><td>No activation recomputation for memory-efficient training</td></tr>
+        <tr><td>LoRA / PEFT adapters</td><td>Missing</td><td>No low-rank adapter support</td></tr>
+        <tr><td>Quantization</td><td>Missing</td><td>No INT8/INT4 quantization for inference</td></tr>
+        <tr><td>Full HF model zoo</td><td>Partial</td><td>GPT-2 key mapping works; other GPT variants not tested</td></tr>
+        <tr><td>ONNX export</td><td>Skeleton</td><td><code>ONNXExporter</code> structure exists; needs full operator support</td></tr>
+        <tr><td>Quantization (INT8/INT4)</td><td>Missing</td><td>No quantization for inference</td></tr>
+      </table>
+
+      <div class="warning"><strong>This is a teaching implementation.</strong> It favours readable code over throughput. There is no fused attention kernel, no memory-efficient attention, and no distributed training. Use it to understand the shapes, the mask, and the loss; use a production framework for large-scale pretraining.</div>
+
+      <div class="paging">
+        <a href="19-bert.html">← 19 · BERT</a>
+        <a href="21-api-reference.html">21 · API reference →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

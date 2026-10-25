@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project 8 · Character-level text generation — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="../index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="../index.html">← Back to book</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Project 8</div>
+    <article>
+      <div class="eyebrow">Project 8 · Character-level text generation</div>
+      <h1>Teaching a network to write, one character at a time</h1>
+      <p class="lead">Given a fixed window of the last N characters, the network predicts which character comes next — and sampling from that prediction writes new text. The fun part is <em>temperature</em>: one dial that slides the output between boring repetition and wild invention.</p>
+
+      <h2>What the project does</h2>
+      <p>The corpus (any plain-text book works) is reduced to its ~65 distinct characters. Every training example is a window of 40 characters plus the single character that follows it. After training, you seed it with a few words and let it keep predicting the next character, feeding each sample back in as input.</p>
+      <div class="formula">
+        P(next char | previous 40 chars) &nbsp;&nbsp;→&nbsp;&nbsp; sample one char &nbsp;→&nbsp; append &nbsp;→&nbsp; repeat
+      </div>
+
+      <h2>The architecture</h2>
+      <pre><code>int VOCAB = 65;          // a-z, A-Z, digits, punctuation, space
+int WINDOW = 40;         // characters of context
+
+int[] topology = {VOCAB * WINDOW, 256, VOCAB};
+
+ActivationFunction[] activations = {
+    ActivationFunction.linear(),   // one-hot window, flattened
+    ActivationFunction.relu(),
+    ActivationFunction.linear()    // one logit per vocabulary char
+};
+
+NeuralNetwork net = new NeuralNetwork(
+    topology, activations,
+    LossFunction.softmaxCrossEntropy(),
+    new Adam(0.001f),
+    42L,
+    WeightInitializer.heNormal());</code></pre>
+
+      <h2>Encoding a window</h2>
+      <pre><code>// one-hot encode WINDOW characters into a single long vector
+float[] encode(String text, int start) {
+    float[] x = new float[VOCAB * WINDOW];
+    for (int i = 0; i &lt; WINDOW; i++) {
+        int c = indexOf(text.charAt(start + i));
+        x[i * VOCAB + c] = 1f;
+    }
+    return x;
+}
+
+// build every (window, next-char) pair from the corpus
+for (int i = 0; i + WINDOW &lt; corpus.length(); i++) {
+    inputs[i]  = encode(corpus, i);
+    targets[i] = oneHot(indexOf(corpus.charAt(i + WINDOW)), VOCAB);
+}
+
+net.fit(new Trainer(8, 64, true, 42L), inputs, targets);</code></pre>
+
+      <h2>Temperature sampling</h2>
+      <pre><code>String sample(String seed, int length, float temperature) {
+    StringBuilder out = new StringBuilder(seed);
+    float[] context = encode(seed, seed.length() - WINDOW);
+
+    for (int step = 0; step &lt; length; step++) {
+        float[] logits = net.predict(context);
+
+        // temperature rescales the logits, then softmax
+        for (int i = 0; i &lt; logits.length; i++) {
+            logits[i] /= temperature;
+        }
+        double[] probs = softmax(logits);
+
+        int chosen = rouletteWheel(probs);   // random draw, not argmax
+        out.append(charOf(chosen));
+
+        context = shiftWindow(context, chosen);  // drop first, append new
+    }
+    return out.toString();
+}</code></pre>
+      <div class="note"><strong>Why sample instead of argmax?</strong> Argmax always picks the most likely character, so the text freezes into a loop within a few steps. Sampling keeps the alternatives alive — temperature controls how alive: 0.2 makes them nearly irrelevant, 1.5 makes long shots competitive.</div>
+
+      <h2>Expected output</h2>
+      <pre><code>temperature 0.2
+  "the the the the the the the the the the the the "
+
+temperature 0.8
+  "it was the best of times, it was the worst of tim"
+
+temperature 1.4
+  "it was the pest of bests, it wos the wurst of tibe"</code></pre>
+      <p>Loss after 8 epochs sits around 1.4–1.6 (in nats per character). Low temperature looks locally correct but repeats; high temperature is surprising but breaks words; 0.8–1.0 is the sweet spot where the text stays grammatical and still says new things.</p>
+
+      <h2>What you learn from this project</h2>
+      <ul>
+        <li><strong>Discrete outputs</strong> — a vocabulary index, one-hot encoding, and softmax cross-entropy: the standard recipe for any classification-style output.</li>
+        <li><strong>Sliding windows</strong> — one corpus becomes thousands of training pairs, the same trick project 9 uses for time series.</li>
+        <li><strong>Inference is a loop</strong> — generation reuses the training model with no changes; only the input construction differs.</li>
+        <li><strong>Sampling distributions</strong> — temperature, softmax and roulette-wheel selection, which appear again in project 12.</li>
+      </ul>
+
+      <div class="paging">
+        <a href="p07.html">← Previous project</a>
+        <a href="p09.html">Next project →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

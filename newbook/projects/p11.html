@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project 11 · Reinforcement learning — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="../index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="../index.html">← Back to book</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Project 11</div>
+    <article>
+      <div class="eyebrow">Project 11 · Reinforcement learning</div>
+      <h1>Multi-armed bandit, epsilon-greedy, and reward tracking</h1>
+      <p class="lead">There are no labels in this project — only rewards. A four-armed bandit pays out according to hidden probabilities, and the network must learn which arm to pull by trial and error. It is the smallest possible reinforcement-learning problem, and it shows the explore-versus-exploit trade-off in one clean curve.</p>
+
+      <h2>What the project does</h2>
+      <p>Each step, the agent sees a 4-dim context, picks one of four arms, and receives a reward in [0, 1]. The network predicts a value for every arm; ε of the time it ignores those predictions and tries a random arm. Over 2,000 steps the average reward climbs toward the best arm's payoff.</p>
+      <div class="formula">
+        a = random &lt; ε ? random arm : argmax Q(s, a) &nbsp;&nbsp;→&nbsp;&nbsp; reward r &nbsp;→&nbsp; move Q toward r
+      </div>
+
+      <h2>The architecture</h2>
+      <pre><code>int ARMS = 4;
+
+int[] topology = {4, 16, ARMS};
+
+ActivationFunction[] activations = {
+    ActivationFunction.linear(),   // context: current state features
+    ActivationFunction.relu(),
+    ActivationFunction.linear()    // one Q-value per arm
+};
+
+NeuralNetwork qNet = new NeuralNetwork(
+    topology, activations,
+    LossFunction.meanSquaredError(),
+    new SGD(0.01f),
+    42L,
+    WeightInitializer.xavierUniform());</code></pre>
+
+      <h2>ε-greedy selection and the learning step</h2>
+      <pre><code>float epsilon = 0.10f;
+Random rng = new Random(42L);
+float totalReward = 0f;
+
+for (int step = 0; step &lt; 2000; step++) {
+    float[] state = contextFor(step);          // 4-dim context
+    float[] q = qNet.predict(state);
+
+    int arm;
+    if (rng.nextFloat() &lt; epsilon) {
+        arm = rng.nextInt(ARMS);               // explore
+    } else {
+        arm = ClassificationMetrics.argmax(q); // exploit
+    }
+
+    float reward = bandit.pull(arm);            // hidden payoff
+    totalReward += reward;
+
+    // supervise the chosen arm's output toward the reward
+    float[] target = q.clone();
+    target[arm] = reward;
+    qNet.fit(new Trainer(1, 1, false, step), 
+        new float[][] {state}, new float[][] {target});
+
+    if (step % 200 == 0) {
+        System.out.printf("step %4d  avg reward %.3f  eps %.2f%n",
+            step, totalReward / (step + 1), epsilon);
+    }
+    epsilon = Math.max(0.01f, epsilon * 0.999f);   // decay
+}</code></pre>
+      <div class="note"><strong>Why MSE here?</strong> The target vector is the current Q-values with only the chosen arm corrected toward its observed reward — a one-step temporal-difference update with squared error. Predictions for arms that were <em>not</em> pulled stay unchanged because their targets equal their current outputs.</div>
+
+      <h2>Expected output</h2>
+      <pre><code>step    0  avg reward 0.412  eps 0.10
+step  200  avg reward 0.507  eps 0.10
+step  600  avg reward 0.594  eps 0.09
+step 1200  avg reward 0.641  eps 0.08
+step 1999  avg reward 0.668  eps 0.07
+
+best arm estimated Q: [0.19 0.68 0.31 0.44]
+true arm payoffs:     [0.20 0.70 0.30 0.45]</code></pre>
+      <p>The average reward rises quickly as the network identifies arm 1, then flattens — the remaining gap comes from the ε exploration that is deliberately kept on. Set ε to 0 and you exploit perfectly but never discover that arm 1 was best in the first place.</p>
+
+      <h2>What you learn from this project</h2>
+      <ul>
+        <li><strong>Learning from rewards</strong> — no dataset, no labels; the environment supplies the training signal one action at a time.</li>
+        <li><strong>Exploration vs exploitation</strong> — ε controls the trade-off, and the decay schedule shows why you explore early and exploit later.</li>
+        <li><strong>Turn RL into supervised updates</strong> — a target vector built from the observed reward lets you reuse <code>fit</code> unchanged.</li>
+        <li><strong>Tracking progress</strong> — a running average of reward is the metric that matters; instantaneous reward is far too noisy to read.</li>
+      </ul>
+
+      <div class="paging">
+        <a href="p10.html">← Previous project</a>
+        <a href="p12.html">Next project →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>10 · Evaluation &amp; confusion matrix — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html">02 · Forward pass</a>
+      <a href="03-backprop.html">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses &amp; optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html">08 · Downloader &amp; loader</a>
+      <a href="09-keras-like.html">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html" class="active">10 · Evaluation &amp; confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html">13 · Run it</a>
+      <a href="14-full-walkthrough.html">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html">16 · Classical machine learning</a>
+      <a href="17-autograd.html">17 · Autograd</a>
+      <a href="18-transformers.html">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html">20 · GPT</a>
+      <a href="21-api-reference.html">21 · API reference</a>
+      <a href="performance.html">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Chapter 10</div>
+    <article>
+      <div class="eyebrow">10 · Evaluation &amp; confusion matrix</div>
+      <h1>Accuracy, per-class errors, and reading the matrix</h1>
+      <p class="lead">After training you need to know <em>how well</em> the model does and <em>where</em> it fails. Three small methods do this: one returns a number, one prints a matrix, one picks the class.</p>
+
+      <h2>10.1 argmax — outputs → class id</h2>
+      <pre><code>/**
+ * Returns the index of the largest output value.
+ *
+ * @param values network outputs, e.g. 10 linear scores
+ * @return index of the maximum, i.e. the predicted class
+ * @throws IllegalArgumentException if the array is null or empty
+ */
+private static int argmax(double[] values) {
+    if (values == null || values.length == 0) {
+        throw new IllegalArgumentException("Output must not be empty");
+    }
+
+    int best = 0;
+
+    for (int i = 1; i &lt; values.length; i++) {
+        if (values[i] &gt; values[best]) {
+            best = i;
+        }
+    }
+
+    return best;
+}</code></pre>
+      <p>Ties resolve to the lowest index because the comparison is strictly greater-than. With linear outputs, argmax is equivalent to taking the softmax first — softmax is monotonic, so it never changes which index is largest.</p>
+
+      <h2>10.2 evaluateAccuracy — a single number</h2>
+      <pre><code>/**
+ * Classification accuracy over a labelled set.
+ *
+ * @param network trained network
+ * @param images  examples, [N][784]
+ * @param labels  true class ids, [N]
+ * @return fraction correct, in [0, 1]
+ * @throws IllegalArgumentException if the arrays are empty or
+ *                                  their lengths differ
+ */
+private static double evaluateAccuracy(NeuralNetwork network,
+                                     double[][] images,
+                                     int[] labels) {
+    if (images.length != labels.length || images.length == 0) {
+        throw new IllegalArgumentException("Invalid evaluation dataset");
+    }
+
+    int correct = 0;
+
+    for (int i = 0; i &lt; images.length; i++) {
+        int predicted = argmax(network.predict(images[i]));
+
+        if (predicted == labels[i]) {
+            correct++;
+        }
+    }
+
+    return (double) correct / (double) images.length;
+}</code></pre>
+      <div class="formula">
+        accuracy = correct / N &nbsp;&nbsp;→&nbsp;&nbsp; 8407 / 10000 = 0.8407 = 84.07%
+      </div>
+
+      <h2>10.3 evaluate — accuracy plus confusion matrix</h2>
+      <pre><code>/**
+ * Prints overall accuracy and the full confusion matrix.
+ *
+ * Matrix convention: rows = actual class, columns = predicted class,
+ * so confusion[actual][predicted] counts every example.
+ *
+ * @param network trained network
+ * @param images  test examples, [N][784]
+ * @param labels  test labels, [N]
+ */
+private static void evaluate(NeuralNetwork network,
+                           double[][] images,
+                           int[] labels) {
+
+    int[][] confusion = new int[CLASSES][CLASSES];
+    int correct = 0;
+
+    for (int i = 0; i &lt; images.length; i++) {
+        int predicted = argmax(network.predict(images[i]));
+        int actual    = labels[i];
+
+        confusion[actual][predicted]++;
+
+        if (predicted == actual) {
+            correct++;
+        }
+    }
+
+    System.out.printf("Test accuracy: %.2f%% (%d/%d)%n",
+        100.0 * correct / images.length, correct, images.length);
+
+    System.out.println(
+        "\nConfusion matrix (rows = actual, cols = predicted):");
+
+    // header: predicted class numbers
+    System.out.print("           ");
+    for (int c = 0; c &lt; CLASSES; c++) {
+        System.out.printf("%6d", c);
+    }
+    System.out.println();
+
+    // one row per actual class, labelled with its class name
+    for (int actual = 0; actual &lt; CLASSES; actual++) {
+        System.out.printf("%-12s ", CLASS_NAMES[actual]);
+
+        for (int predicted = 0; predicted &lt; CLASSES; predicted++) {
+            System.out.printf("%6d", confusion[actual][predicted]);
+        }
+
+        System.out.println();
+    }
+}</code></pre>
+
+      <h2>10.4 Example output</h2>
+      <pre><code>Test accuracy: 84.07% (8407/10000)
+
+Confusion matrix (rows = actual, cols = predicted):
+                0     1     2     3     4     5     6     7     8     9
+T-shirt/top    779     5    31    47     2     3   119     0    14     0
+Trouser          2   960     4    27     3     0     3     0     1     0
+Pullover         8     4   767    10   115     0    84     0    12     0
+Dress           33    12    17   851    36     1    45     0     5     0
+Coat            1     4   142    34   704     0   109     0     6     0
+Sandal          1     0     0     2     0   899     1    57     3    37
+Shirt          120     2   129    35    87     0   606     0    21     0
+Sneaker         0     0     0     0     0    24     0   935     0    41
+Bag             1     1     6     6     1     2    19     4   958     2
+Ankle boot      0     0     0     0     0     7     1    44     0   948</code></pre>
+
+      <h3>How to read it</h3>
+      <ul>
+        <li><strong>Diagonal</strong> = correct predictions. Sum of diagonal = 8,407 → matches the reported accuracy.</li>
+        <li><strong>Off-diagonal in a row</strong> = that actual class mistaken for something else. Row 0 (T-shirt/top): 119 became "Shirt" — expected, they look alike.</li>
+        <li><strong>Off-diagonal in a column</strong> = which true classes get pulled into a prediction. Column 6 (Shirt) collects items from many rows.</li>
+        <li><strong>Rows sum to the class count</strong> (1,000 per class in this test set), so you can eyeball per-class recall: <code>779/1000 = 77.9%</code> for T-shirt/top, <code>960/1000 = 96.0%</code> for Trouser.</li>
+      </ul>
+
+      <div class="note"><strong>Per-class recall formula.</strong> For class c: <code>recall(c) = confusion[c][c] / Σₖ confusion[c][k]</code>. Precision instead divides by a column: <code>precision(c) = confusion[c][c] / Σₖ confusion[k][c]</code>. Both are one line of code over the matrix — a good exercise in chapter 15.</div>
+
+      <h2>10.5 Printing class names instead of numbers</h2>
+      <p>The matrix header uses indices for compactness, while the row labels use names from <code>FashionMNISTLoader.CLASS_NAMES</code>. For sample predictions the runner prints both:</p>
+      <pre><code>System.out.printf("Predicted: %-15s (%d) | Actual: %-15s (%d)%n",
+    CLASS_NAMES[predicted], predicted,
+    CLASS_NAMES[actual],    actual);
+
+// Predicted: Shirt           (6) | Actual: Dress           (3)</code></pre>
+
+      <div class="paging">
+        <a href="09-keras-like.html">← 09 · Keras-like classifier</a>
+        <a href="11-html-report.html">11 · HTML report →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

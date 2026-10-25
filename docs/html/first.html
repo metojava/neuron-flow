@@ -1,0 +1,158 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Original Java source · NFS reader</title><link rel="stylesheet" href="style.css"></head><body><header><a class="brand" href="index.html"><span>NFS / READER</span>Deep learning notes</a><nav aria-label="Documents"><a href="index.html">Contents</a><a href="first.html" aria-current="page">Original Java</a><a href="docs.html">Implementation notes</a><a href="explanations.html">Complete tutorial</a><a href="classical-ml.html">Classical ML</a></nav></header><div class="page"><aside><div class="aside-title">On this page</div><nav aria-label="Page contents"><a class="level2" href="#neuron">Neuron.java</a><a class="level2" href="#layer">Layer.java</a><a class="level2" href="#neuralnetwork">NeuralNetwork.java</a><a class="level2" href="#main">Main.java</a></nav></aside><main><div class="eyebrow">SOURCE / first.txt</div><h1>Original Java source</h1><div class="warning"><strong>About these documents.</strong> This is a formatted copy of the original text. The source describes earlier or proposed versions of the library, so class names, packages, commands, and features may differ from the current code. Equations are displayed in simplified notation; the original LaTeX appears when hovering over display equations.</div><p class="lead">The original four class listings, separated into sections for easier reading.</p><h2 id="neuron">Neuron.java</h2><pre class="code"><code>import java.util.Random;
+
+public class Neuron {
+    public double[] weights;
+    public double bias;
+    public double value;    // The activation value after the activation function
+    public double gradient; // Used during backpropagation
+
+    // Constructor: Number of inputs dictates how many weights this neuron needs
+    public Neuron(int numInputs, Random rand) {
+        this.weights = new double[numInputs];
+        for (int i = 0; i &lt; numInputs; i++) {
+            this.weights[i] = rand.nextDouble() * 2 - 1; // Initialize random weight between -1 and 1
+        }
+        this.bias = rand.nextDouble() * 2 - 1;           // Initialize random bias between -1 and 1
+    }
+}</code></pre><h2 id="layer">Layer.java</h2><pre class="code"><code>import java.util.Random;
+
+public class Layer {
+    public Neuron[] neurons;
+
+    public Layer(int numNeurons, int numInputsPerNeuron, Random rand) {
+        this.neurons = new Neuron[numNeurons];
+        for (int i = 0; i &lt; numNeurons; i++) {
+            this.neurons[i] = new Neuron(numInputsPerNeuron, rand);
+        }
+    }
+}</code></pre><h2 id="neuralnetwork">NeuralNetwork.java</h2><pre class="code"><code>import java.util.Random;
+
+public class NeuralNetwork {
+    private Layer[] layers;
+    private double learningRate;
+
+    // Defines network shape. Example: {2, 4, 1} means 2 inputs, 4 hidden neurons, 1 output.
+    public NeuralNetwork(int[] topology, double learningRate) {
+        this.learningRate = learningRate;
+        this.layers = new Layer[topology.length];
+        Random rand = new Random();
+
+        // Input layer doesn&#x27;t have incoming weights
+        this.layers[0] = new Layer(topology[0], 0, rand);
+
+        // Build hidden and output layers
+        for (int i = 1; i &lt; topology.length; i++) {
+            this.layers[i] = new Layer(topology[i], topology[i - 1], rand);
+        }
+    }
+
+    // Sigmoid Activation Function to squish numbers between 0 and 1
+    private double sigmoid(double x) {
+        return 1.0 / (1.0 + Math.exp(-x));
+    }
+
+    // Derivative of Sigmoid used for backpropagation gradient calculation
+    private double sigmoidDerivative(double sigmoidValue) {
+        return sigmoidValue * (1.0 - sigmoidValue);
+    }
+
+    // Forward Propagation: Calculates outputs based on inputs
+    public double[] forwardPropagate(double[] inputs) {
+        // Set input layer values
+        for (int i = 0; i &lt; layers[0].neurons.length; i++) {
+            layers[0].neurons[i].value = inputs[i];
+        }
+
+        // Propagate forward through subsequent layers
+        for (int l = 1; l &lt; layers.length; l++) {
+            Layer prevLayer = layers[l - 1];
+            Layer currLayer = layers[l];
+
+            for (int n = 0; n &lt; currLayer.neurons.length; n++) {
+                Neuron neuron = currLayer.neurons[n];
+                double activationSum = neuron.bias;
+
+                for (int p = 0; p &lt; prevLayer.neurons.length; p++) {
+                    activationSum += prevLayer.neurons[p].value * neuron.weights[p];
+                }
+                neuron.value = sigmoid(activationSum);
+            }
+        }
+
+        // Return values from the output layer
+        Layer outputLayer = layers[layers.length - 1];
+        double[] outputs = new double[outputLayer.neurons.length];
+        for (int i = 0; i &lt; outputs.length; i++) {
+            outputs[i] = outputLayer.neurons[i].value;
+        }
+        return outputs;
+    }
+
+    // Backpropagation: Trains the weights and biases using error gradients
+    public void backpropagate(double[] targets) {
+        Layer outputLayer = layers[layers.length - 1];
+
+        // 1. Calculate Gradients for the Output Layer
+        for (int i = 0; i &lt; outputLayer.neurons.length; i++) {
+            Neuron neuron = outputLayer.neurons[i];
+            double error = targets[i] - neuron.value;
+            neuron.gradient = error * sigmoidDerivative(neuron.value);
+        }
+
+        // 2. Calculate Gradients for Hidden Layers (Working backwards)
+        for (int l = layers.length - 2; l &gt; 0; l--) {
+            Layer currLayer = layers[l];
+            Layer nextLayer = layers[l + 1];
+
+            for (int i = 0; i &lt; currLayer.neurons.length; i++) {
+                Neuron neuron = currLayer.neurons[i];
+                double errorSum = 0;
+                for (int j = 0; j &lt; nextLayer.neurons.length; j++) {
+                    errorSum += nextLayer.neurons[j].gradient * nextLayer.neurons[j].weights[i];
+                }
+                neuron.gradient = errorSum * sigmoidDerivative(neuron.value);
+            }
+        }
+
+        // 3. Update Weights and Biases across all trainable layers
+        for (int l = 1; l &lt; layers.length; l++) {
+            Layer currLayer = layers[l];
+            Layer prevLayer = layers[l - 1];
+
+            for (int i = 0; i &lt; currLayer.neurons.length; i++) {
+                Neuron neuron = currLayer.neurons[i];
+                neuron.bias += learningRate * neuron.gradient; // Update bias
+                
+                for (int j = 0; j &lt; prevLayer.neurons.length; j++) {
+                    neuron.weights[j] += learningRate * neuron.gradient * prevLayer.neurons[j].value; // Update weight
+                }
+            }
+        }
+    }
+}</code></pre><h2 id="main">Main.java</h2><pre class="code"><code>public class Main {
+    public static void main(String[] args) {
+        // Topology: 2 inputs, 4 hidden neurons, 1 output. Learning rate: 0.5.
+        NeuralNetwork nn = new NeuralNetwork(new int[]{2, 4, 1}, 0.5);
+
+        // XOR Training Dataset
+        double[][] inputs = { {0, 0}, {0, 1}, {1, 0}, {1, 1} };
+        double[][] targets = { {0}, {1}, {1}, {0} };
+
+        System.out.println(&quot;--- Training the Neural Network ---&quot;);
+        // Train for 20,000 generations (epochs)
+        for (int epoch = 0; epoch &lt; 20000; epoch++) {
+            for (int i = 0; i &lt; inputs.length; i++) {
+                nn.forwardPropagate(inputs[i]);
+                nn.backpropagate(targets[i]);
+            }
+        }
+        System.out.println(&quot;Training Complete!\n&quot;);
+
+        System.out.println(&quot;--- Testing Predictions ---&quot;);
+        for (int i = 0; i &lt; inputs.length; i++) {
+            double[] output = nn.forwardPropagate(inputs[i]);
+            System.out.printf(&quot;Input: [%.0f, %.0f] -&gt; Predicted Output: %.4f (Expected: %.0f)%n&quot;, 
+                inputs[i][0], inputs[i][1], output[0], targets[i][0]);
+        }
+    }
+}</code></pre><footer>Formatted from the original NFS text files · <a href="index.html">Back to contents</a></footer></main></div></body></html>

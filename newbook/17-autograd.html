@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>17 · Autograd — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html">02 · Forward pass</a>
+      <a href="03-backprop.html">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses &amp; optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html">08 · Downloader &amp; loader</a>
+      <a href="09-keras-like.html">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html">10 · Evaluation &amp; confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html">13 · Run it</a>
+      <a href="14-full-walkthrough.html">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html">16 · Classical machine learning</a>
+      <a href="17-autograd.html" class="active">17 · Autograd</a>
+      <a href="18-transformers.html">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html">20 · GPT</a>
+      <a href="21-api-reference.html">21 · API reference</a>
+      <a href="performance.html">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Chapter 17</div>
+    <article>
+      <div class="eyebrow">17 · Autograd</div>
+      <h1>Reverse-mode differentiation on a float tensor</h1>
+      <p class="lead">The <code>autograd</code> package is a small PyTorch-style engine: operations on <code>Tensor</code> objects record how to propagate gradients backwards, and <code>backward()</code> walks that graph in reverse topological order. It is the foundation for the transformer code in the next chapter.</p>
+
+      <h2>17.1 Tensor</h2>
+      <p>A tensor is a flat row-major <code>float[]</code> plus a shape. There are two kinds of tensors:</p>
+      <ul>
+        <li><strong>Constants</strong> created by <code>of</code>, <code>zeros</code>, <code>randn</code> and <code>scalar</code>; they are not tracked.</li>
+        <li><strong>Parameters</strong> created by <code>param</code>, <code>paramZeros</code> and <code>paramRandn</code>; they set <code>requiresGrad()</code> and receive gradients.</li>
+      </ul>
+      <pre><code>Tensor x  = Tensor.of(new float[]{1, 2, 3, 4}, 2, 2);   // {2,2}, constant
+Tensor w  = Tensor.paramRandn(0.1f, 42L, 2, 3);          // {2,3}, trainable
+Tensor b  = Tensor.paramZeros(3);                        // {3},   trainable
+Tensor z  = Tensor.zeros(2, 3);                          // constant zeros
+Tensor s  = Tensor.scalar(1.0f);                         // {1}</code></pre>
+      <table>
+        <tr><th>Method</th><th>Meaning</th></tr>
+        <tr><td><code>data()</code></td><td>Direct read/write access to the flat backing array (used by the optimiser loop).</td></tr>
+        <tr><td><code>toFlat()</code></td><td>Defensive copy of the flat data.</td></tr>
+        <tr><td><code>shape()</code>, <code>ndim()</code>, <code>numel()</code>, <code>size(dim)</code></td><td>Shape metadata; negative dimensions count from the end.</td></tr>
+        <tr><td><code>get(i...)</code>, <code>set(v, i...)</code></td><td>Read or write one element with one index per dimension.</td></tr>
+        <tr><td><code>grad()</code></td><td>Gradient buffer, allocated as zeros on first access.</td></tr>
+        <tr><td><code>hasGrad()</code>, <code>zeroGrad()</code></td><td>Inspect or clear the gradient buffer.</td></tr>
+        <tr><td><code>backward()</code></td><td>Reverse-mode pass from a scalar tensor.</td></tr>
+        <tr><td><code>detach()</code></td><td>Share data but drop graph tracking.</td></tr>
+      </table>
+
+      <h2>17.2 How backward works</h2>
+      <p>Each differentiable operation creates an output tensor and attaches two things: its parent tensors and a closure that adds the output gradient into the parents' gradient buffers. <code>backward()</code> builds a topological order from the loss, reverses it, seeds the loss gradient with <code>1.0</code>, and runs every closure.</p>
+      <div class="formula">
+        forward: y = f(x) &nbsp;&nbsp;→&nbsp;&nbsp; backward: ∂L/∂x += ∂L/∂y · ∂y/∂x
+      </div>
+      <p>Gradients <strong>accumulate with <code>+=</code></strong>. Call <code>zeroGrad()</code> on every parameter between optimiser steps, or deliberately skip it to accumulate across mini-batches. <code>backward()</code> requires a scalar; if the tensor has more than one element it throws <code>IllegalStateException</code>.</p>
+      <div class="warning"><strong>No tape reset.</strong> The graph is not freed or detached after <code>backward()</code>. Reusing the same loss tensor for a second backward call adds gradients again; rebuild the forward graph for each batch.</div>
+
+      <h2>17.3 Operations</h2>
+      <table>
+        <tr><th>Category</th><th>Methods</th><th>Notes</th></tr>
+        <tr><td>Arithmetic</td><td><code>add</code>, <code>sub</code>, <code>mul</code>, <code>scale</code>, <code>addScalar</code></td><td>NumPy broadcasting, aligned from the right.</td></tr>
+        <tr><td>Linear algebra</td><td><code>matmul</code></td><td>Batched; last two dimensions are the matrix.</td></tr>
+        <tr><td>Activations</td><td><code>relu</code>, <code>gelu</code>, <code>tanh</code></td><td>GELU uses the tanh approximation.</td></tr>
+        <tr><td>Probability</td><td><code>softmax</code></td><td>Numerically stable, over the last dimension.</td></tr>
+        <tr><td>Loss</td><td><code>crossEntropy</code></td><td>Fused log-softmax + NLL, returns a scalar mean.</td></tr>
+        <tr><td>Normalisation</td><td><code>layerNorm</code></td><td><code>gamma</code> and <code>beta</code> are trainable inputs.</td></tr>
+        <tr><td>Embedding</td><td><code>embedding</code></td><td>Gathers rows of a <code>{vocab, D}</code> weight matrix.</td></tr>
+        <tr><td>Shape</td><td><code>reshape</code>, <code>flattenLeading</code>, <code>unflattenLeading</code>, <code>transpose</code></td><td>Row-major data, so reshape never copies logically.</td></tr>
+        <tr><td>Masks</td><td><code>causalMask</code></td><td><code>{T,T}</code> with <code>-1e9</code> above the diagonal.</td></tr>
+        <tr><td>Indexing</td><td><code>gatherRows</code></td><td>Select rows from a 2-D tensor.</td></tr>
+      </table>
+
+      <h3>Broadcasting</h3>
+      <p>Element-wise operations align shapes from the right and treat missing leading dimensions as size 1. For example <code>{4,3} + {3}</code> broadcasts the bias across four rows; <code>{2,1} * {1,5}</code> produces <code>{2,5}</code>. When a parameter is broadcast, its gradient is reduced back to the parameter's original shape.</p>
+
+      <h3>Batched matmul</h3>
+      <pre><code>{M,K}     x {K,N}     -&gt; {M,N}
+{B,M,K}   x {K,N}     -&gt; {B,M,N}     // 2-D right operand broadcasts
+{B,M,K}   x {B,K,N}   -&gt; {B,M,N}
+{B1,B2,M,K} x {B1,B2,K,N} -&gt; {B1,B2,M,N}</code></pre>
+
+      <h3>Cross-entropy</h3>
+      <p><code>Ops.crossEntropy(logits, targets)</code> accepts logits of shape <code>{N,V}</code> or <code>{B,T,V}</code> and flattens all leading dimensions; <code>targets.length</code> must equal the number of rows. It subtracts the row maximum before exponentiating, averages the negative log-probability, and its backward pass is the familiar <code>(softmax - oneHot) / N</code>.</p>
+
+      <h2>17.4 A complete training loop</h2>
+      <p>There is no <code>Module</code> or <code>Optimizer</code> wrapper in this package, so a model is just a list of parameter tensors and a forward function. The following two-layer classifier trains on random data:</p>
+      <pre><code>import autograd.Ops;
+import autograd.Tensor;
+
+import java.util.List;
+import java.util.Random;
+
+int batch = 16;
+int features = 4;
+int hidden = 8;
+int classes = 3;
+
+Tensor w1 = Tensor.paramRandn(0.1f, 1L, features, hidden);
+Tensor b1 = Tensor.paramZeros(hidden);
+Tensor w2 = Tensor.paramRandn(0.1f, 2L, hidden, classes);
+Tensor b2 = Tensor.paramZeros(classes);
+List&lt;Tensor&gt; parameters = List.of(w1, b1, w2, b2);
+
+Random random = new Random(7);
+float learningRate = 0.05f;
+
+for (int step = 0; step &lt; 500; step++) {
+    float[] inputs = new float[batch * features];
+    int[] targets = new int[batch];
+    for (int i = 0; i &lt; batch; i++) {
+        targets[i] = random.nextInt(classes);
+        for (int f = 0; f &lt; features; f++) {
+            inputs[i * features + f] = random.nextFloat();
+        }
+    }
+
+    Tensor x = Tensor.of(inputs, batch, features);
+    Tensor h = Ops.relu(Ops.add(Ops.matmul(x, w1), b1));
+    Tensor logits = Ops.add(Ops.matmul(h, w2), b2);
+    Tensor loss = Ops.crossEntropy(logits, targets);
+
+    for (Tensor p : parameters) {
+        p.zeroGrad();
+    }
+    loss.backward();
+
+    for (Tensor p : parameters) {
+        float[] values = p.data();
+        float[] gradients = p.grad();
+        for (int i = 0; i &lt; values.length; i++) {
+            values[i] -= learningRate * gradients[i];
+        }
+    }
+
+    if (step % 100 == 0) {
+        System.out.printf(&quot;step %d loss %.4f%n&quot;, step, loss.get(0));
+    }
+}</code></pre>
+
+      <h2>17.5 What is intentionally missing</h2>
+      <ul>
+        <li><strong>No parameter registry or <code>Module</code>.</strong> Collect parameters yourself or call <code>parameters()</code> on the transformer blocks.</li>
+        <li><strong>No optimiser bridge.</strong> <code>optim.SGD</code>, <code>Adam</code>, <code>AdamW</code> and the learning-rate schedules operate on <code>NeuralNetwork</code> / flat vectors, not on <code>autograd.Tensor</code>.</li>
+        <li><strong>No <code>no_grad</code> mode.</strong> Inference still builds a graph unless you wrap work in <code>detach()</code> or only use constants.</li>
+        <li><strong>Scalar backward only.</strong> Reduce a vector loss (for example with a mean) before calling <code>backward()</code>.</li>
+        <li><strong>float32 only.</strong> There is no double or mixed-precision path.</li>
+        <li><strong>Limited operation set.</strong> Convolution, pooling and recurrent cells live in <code>layers</code> and do not participate in this graph.</li>
+      </ul>
+
+      <div class="paging">
+        <a href="16-classical-ml.html">← 16 · Classical ML</a>
+        <a href="18-transformers.html">18 · Transformers →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

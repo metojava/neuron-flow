@@ -1,0 +1,74 @@
+# Transformer API - Missing Pieces Todo List
+# Priority order: 1 = highest
+
+## Core Architecture & Config
+- [x] 1. Config classes: BertConfig, GPTConfig, TransformerConfig base class
+- [x] 2. Model.save(path) / Model.load(path) with config + weights
+- [x] 3. BertConfig: vocab_size, hidden_size, num_layers, num_heads, intermediate_size, max_position_embeddings, type_vocab_size, hidden_dropout_prob, attention_probs_dropout_prob, initializer_range, layer_norm_eps
+- [x] 4. GPTConfig: vocab_size, n_positions, n_embd, n_layer, n_head, n_inner, activation_function, resid_pdrop, embd_pdrop, attn_pdrop, layer_norm_epsilon, initializer_range
+- [ ] 5. from_pretrained(path) / save_pretrained(path) for HF compatibility
+
+## Weight Loading & HF Compatibility
+- [x] 6. HF weight loader: map HF state_dict keys to our parameter names
+- [x] 7. Load BERT/GPT weights from safetensors (BERT-base, GPT-2 small/medium/large)
+- [x] 8. Convert HF tokenizer vocab/merges to our Tokenizer format
+- [x] 9. Weight conversion script: HF -> our format
+
+## Special Tokens & Padding
+- [x] 10. SpecialTokens class: CLS, SEP, MASK, PAD, UNK, EOS, BOS
+- [x] 11. Tokenizer.add_special_tokens() / get_special_tokens()
+- [x] 12. Padding mask support in MultiHeadAttention (key_padding_mask)
+- [x] 13. Batch encoding with padding/truncation in Tokenizer
+- [x] 14. Tokenizer.encode_plus() returning input_ids, attention_mask, token_type_ids
+- [x] 15. Batch encode_plus with batch_encode_plus()
+- [x] 16. Padding mask propagation through Encoder/Decoder/Block/Attention
+
+## BERT-Specific
+- [x] 15. BertModel: TransformerEncoder + PositionalEmbedding + pooling
+- [x] 16. BertForMaskedLM: BertModel + MLMHead
+- [x] 17. BertForNextSentencePrediction: BertModel + NSP head
+- [x] 18. BertForSequenceClassification: BertModel + classification head
+- [x] 19. NSPHead: [CLS] pooling + Linear(2)
+- [x] 20. Full MLM pipeline: masking (15% mask, 10% random, 10% same), loss computation
+- [x] 21. BertForPreTraining: MLM + NSP combined loss
+
+## GPT-Specific
+- [x] 22. GPTConfig with proper GPT-2 initialization (std=0.02, scaled residual)
+- [x] 23. GPTModel: TransformerDecoder with learned positional embeddings
+- [x] 24. GPTLMHeadModel: GPTModel + tied LM head (weight tying with embeddings)
+- [x] 25. GPT-2 style init: scaled residual (1/sqrt(2*n_layer)), std=0.02
+- [x] 26. Learned positional embeddings (not RoPE) for GPT
+- [ ] 26. GPT-2 vocab/merges files (download from HF)
+
+## Training Infrastructure
+- [x] 27. Learning rate scheduler: linear warmup + cosine decay
+- [x] 28. Trainer class: train_loop with gradient accumulation, logging, checkpointing
+- [x] 29. Optimizer wrappers: AdamW with weight decay (exclude bias/LN)
+- [x] 30. Gradient clipping (max_norm)
+- [x] 31. Mixed precision (FP16) support
+- [x] 32. Gradient accumulation steps
+- [x] 33. Distributed data parallel (DDP) hooks
+
+## Evaluation & Generation
+- [x] 33. Perplexity evaluation
+- [x] 34. Beam search generation
+- [x] 35. Top-p (nucleus) sampling
+- [x] 36. Repetition penalty
+- [x] 37. Stop sequences
+
+## Advanced
+- [ ] 38. Gradient checkpointing (activation recomputation)
+- [ ] 39. Flash attention (if Vector API supports)
+- [ ] 40. LoRA adapters for PEFT
+- [ ] 41. Quantization (INT8, INT4) for inference
+- [x] 42. ONNX export for deployment
+
+## Documentation & Examples
+- [x] 43. BERT pretraining example script
+- [x] 44. GPT fine-tuning example script
+- [x] 45. Classification fine-tuning example
+- [x] 46. API documentation (javadoc)
+- [x] 47. Logistic Regression with Parquet I/O example
+
+# Current Status: Core subset + Special Tokens & Padding + BERT + GPT + Training Infra + Generation (beam search, top-p, repetition penalty, stop sequences, perplexity eval) + Mixed Precision + DDP hooks + ONNX export + Logistic Regression Parquet example complete
+# Next: HF weight loading (safetensors), Quantization, LoRA adapters, Flash attention

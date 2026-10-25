@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project 12 · Generative Adversarial Network — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="../index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="../index.html">← Back to book</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Project 12</div>
+    <article>
+      <div class="eyebrow">Project 12 · Generative adversarial network</div>
+      <h1>Two networks, one liar and one detective</h1>
+      <p class="lead">A GAN trains two networks against each other: the generator invents images from random noise, and the discriminator decides which images are real. Neither ever sees a label — the generator learns purely from the discriminator's verdict, and the result is a model that creates new Fashion-MNIST-style pictures.</p>
+
+      <h2>What the project does</h2>
+      <p>The generator maps a 100-dim random vector to a 784-pixel image; the discriminator maps 784 pixels to one probability: real or fake. They are trained in alternation, so as the detective gets sharper the forger must improve — a moving target that is the whole difficulty of GAN training.</p>
+      <div class="flow">
+        <span>Generator <small>noise → 784</small></span><b>→</b>
+        <span>Discriminator <small>real or fake?</small></span><b>→</b>
+        <span>Reward <small>BCE both sides</small></span><b>→</b>
+        <span>Repeat <small>thousands ×</small></span>
+      </div>
+
+      <h2>The two architectures</h2>
+      <pre><code>// generator: 100 random numbers -&gt; one fake image
+NeuralNetwork generator = new NeuralNetwork(
+    new int[] {100, 256, 784},
+    new ActivationFunction[] {
+        ActivationFunction.leakyRelu(0.2f),
+        ActivationFunction.relu(),
+        ActivationFunction.sigmoid()     // pixels in [0, 1]
+    },
+    LossFunction.binaryCrossEntropy(),
+    new Adam(0.0002f), 42L, WeightInitializer.heNormal());
+
+// discriminator: one image -&gt; P(real)
+NeuralNetwork discriminator = new NeuralNetwork(
+    new int[] {784, 256, 1},
+    new ActivationFunction[] {
+        ActivationFunction.leakyRelu(0.2f),
+        ActivationFunction.relu(),
+        ActivationFunction.sigmoid()
+    },
+    LossFunction.binaryCrossEntropy(),
+    new Adam(0.0002f), 43L, WeightInitializer.heNormal());</code></pre>
+      <div class="note"><strong>Same loss, opposite goals.</strong> The discriminator minimizes BCE with targets 1 for real images and 0 for fakes. The generator also minimizes BCE, but with target 1 for images it just produced — it wins when the discriminator answers "real".</div>
+
+      <h2>The adversarial training step</h2>
+      <pre><code>Random rng = new Random(42L);
+
+for (int step = 0; step &lt; 5000; step++) {
+    // 1. train the discriminator on one real and one fake batch
+    float[][] real = realBatch(images, 32, rng);
+    float[][] fake = fakeBatch(generator, 32, rng);
+
+    discriminator.fit(new Trainer(1, 32, false, step),
+        concat(real, fake),
+        concat(zeros(32), ones(32)));
+
+    // 2. train the generator: fool the (frozen-judgement) discriminator
+    float[][] noise = gaussian(32, 100, rng);
+    float[][] produced = predictAll(generator, noise);
+
+    generator.fit(new Trainer(1, 32, false, step),
+        noise, ones(32));   // label them all "real"
+
+    if (step % 500 == 0) {
+        System.out.printf("step %4d  D loss %.4f  G loss %.4f%n",
+            step, discriminator.calculateLoss(dX, dY),
+                  generator.calculateLoss(noise, ones(32)));
+    }
+}</code></pre>
+
+      <h2>Expected training dynamics</h2>
+      <pre><code>step    0  D loss 0.6931  G loss 0.6944   (both guessing)
+step  500  D loss 0.4812  G loss 0.9210   (D getting better)
+step 1500  D loss 0.3904  G loss 1.4025   (G struggling)
+step 3000  D loss 0.5518  G loss 0.8106   (G improving)
+step 5000  D loss 0.6127  G loss 0.6844   (near equilibrium)</code></pre>
+      <p>A healthy GAN ends near D loss ≈ 0.69 — the discriminator is barely better than a coin flip because the fakes are convincing. Early on, D loss near 0 means it wins too easily and the generator receives no useful gradient; that is the signal to slow the discriminator or speed up the generator.</p>
+
+      <h2>Saving and inspecting</h2>
+      <pre><code>generator.saveModel(Path.of("gan-generator.model"));
+discriminator.saveModel(Path.of("gan-discriminator.model"));
+
+// render a 4×4 grid of samples as ASCII art or write a PGM file
+float[] noise = gaussian(1, 100, new Random(7L));
+float[] image = generator.predict(noise);
+writePgm(Path.of("sample.pgm"), image, 28, 28);</code></pre>
+
+      <h2>What you learn from this project</h2>
+      <ul>
+        <li><strong>Adversarial training</strong> — two optimizers, two losses, one moving target; the concept behind modern image generation.</li>
+        <li><strong>Latent-space sampling</strong> — random vectors become structured images, connecting back to the autoencoder's bottleneck in project 7.</li>
+        <li><strong>Diagnosing instability</strong> — reading the D/G loss pair to tell convergence from mode collapse from a stalled discriminator.</li>
+        <li><strong>Pulling it all together</strong> — activations, losses, optimizers, batching, seeds and model persistence, from all eleven previous projects, in one system.</li>
+      </ul>
+
+      <div class="paging">
+        <a href="p11.html">← Previous project</a>
+        <a href="../index.html">Back to book →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,149 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>07 · Fashion MNIST data — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html">02 · Forward pass</a>
+      <a href="03-backprop.html">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses &amp; optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html" class="active">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html">08 · Downloader &amp; loader</a>
+      <a href="09-keras-like.html">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html">10 · Evaluation &amp; confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html">13 · Run it</a>
+      <a href="14-full-walkthrough.html">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html">16 · Classical machine learning</a>
+      <a href="17-autograd.html">17 · Autograd</a>
+      <a href="18-transformers.html">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html">20 · GPT</a>
+      <a href="21-api-reference.html">21 · API reference</a>
+      <a href="performance.html">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Chapter 07</div>
+    <article>
+      <div class="eyebrow">07 · Fashion MNIST data</div>
+      <h1>The dataset and its IDX binary format</h1>
+      <p class="lead">Fashion MNIST is a drop-in replacement for the digit MNIST: 70,000 grayscale 28×28 images across 10 clothing classes. Understanding the raw file layout is the key to loading it yourself.</p>
+
+      <h2>7.1 What is in the dataset</h2>
+      <table>
+        <tr><th>Split</th><th>Images</th><th>Files</th></tr>
+        <tr><td>Training</td><td>60,000</td><td><code>train-images-idx3-ubyte</code>, <code>train-labels-idx1-ubyte</code></td></tr>
+        <tr><td>Test</td><td>10,000</td><td><code>t10k-images-idx3-ubyte</code>, <code>t10k-labels-idx1-ubyte</code></td></tr>
+      </table>
+
+      <h3>The ten classes</h3>
+      <pre><code>0  T-shirt/top    5  Sandal
+1  Trouser        6  Shirt
+2  Pullover       7  Sneaker
+3  Dress          8  Bag
+4  Coat           9  Ankle boot</code></pre>
+      <p>Classes 0–4 are upper-body clothing, 5 and 7–9 are footwear (sometimes counted as 3–4–5+7-8-9 "lower body / shoes"), which is why similar items like shirts and pullovers get confused — a useful thing to keep in mind when reading the confusion matrix.</p>
+
+      <h2>7.2 The IDX format</h2>
+      <p>IDX is a tiny header + raw bytes format. Everything is stored <strong>big-endian</strong>, which is exactly Java's <code>DataInputStream.readInt()</code> default.</p>
+
+      <h3>Image file layout</h3>
+      <pre><code>offset  size  meaning
+0       4     magic number  = 2051 (0x00000803)
+4       4     number of images N
+8       4     rows    = 28
+12      4     cols    = 28
+16      N×784 pixel bytes, row-major, each 0..255
+
+Total size = 16 + N × 784 bytes
+For 60,000 images: 16 + 47,040,000 = 47,040,016 bytes</code></pre>
+
+      <h3>Label file layout</h3>
+      <pre><code>offset  size  meaning
+0       4     magic number  = 2049 (0x00000801)
+4       4     number of labels N
+8       N     one unsigned byte per label (0..9)
+
+Total size = 8 + N bytes
+For 60,000 labels: 60,008 bytes</code></pre>
+
+      <div class="note"><strong>How the loader checks itself.</strong> It compares <code>Files.size(path)</code> against the expected length before reading, then verifies end-of-file after reading. Truncated or corrupted downloads fail fast with a clear message instead of silently producing garbage.</div>
+
+      <h2>7.3 Normalization: bytes → [0, 1]</h2>
+      <p>Neural networks train far better when inputs are small and centred-ish. The loader divides each byte by 255:</p>
+      <div class="formula">
+        x = pixelByte / 255.0 &nbsp;&nbsp;→&nbsp;&nbsp; 0 → 0.0, 128 → 0.502, 255 → 1.0
+      </div>
+      <pre><code>double[][] images = new double[count][INPUT_SIZE];
+
+for (int i = 0; i &lt; count; i++) {
+    for (int p = 0; p &lt; INPUT_SIZE; p++) {
+        images[i][p] = in.readUnsignedByte() / 255.0;
+    }
+}</code></pre>
+      <p><code>readUnsignedByte()</code> returns 0–255 (not −128..127), and because the dividend <code>255.0</code> is a double, the division is floating-point.</p>
+
+      <h2>7.4 One-hot encoding the labels</h2>
+      <p>With mean-squared error the target for class 3 should be a vector that is 1.0 at index 3 and 0.0 elsewhere:</p>
+      <pre><code>/**
+ * Converts integer labels to one-hot target vectors.
+ *
+ * @param labels class indices, each in [0, NUM_CLASSES)
+ * @return       [labels.length][NUM_CLASSES] matrix of 0.0/1.0
+ */
+private static double[][] oneHotEncode(int[] labels) {
+    double[][] targets = new double[labels.length][NUM_CLASSES];
+
+    for (int i = 0; i &lt; labels.length; i++) {
+        int label = labels[i];
+
+        if (label &lt; 0 || label &gt;= NUM_CLASSES) {
+            throw new IllegalArgumentException(
+                "Invalid label: " + label);
+        }
+
+        targets[i][label] = 1.0;
+    }
+
+    return targets;
+}</code></pre>
+
+      <div class="formula">
+        label 3 → [0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
+      </div>
+
+      <h2>7.5 From file to training arrays</h2>
+      <div class="flow">
+        <span>.gz download</span><b>→</b>
+        <span>decompress</span><b>→</b>
+        <span>parse IDX</span><b>→</b>
+        <span>÷255 normalize</span><b>→</b>
+        <span>one-hot labels</span><b>→</b>
+        <span>fit(…)</span>
+      </div>
+
+      <div class="paging">
+        <a href="06-training.html">← 06 · Training loop</a>
+        <a href="08-downloader-loader.html">08 · Downloader &amp; loader →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

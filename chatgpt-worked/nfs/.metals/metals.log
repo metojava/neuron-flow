@@ -1,0 +1,27 @@
+2026.10.18 21:01:32 INFO  Started: Metals version 1.6.7 in folders 'C:\Users\dell\Desktop\nfs' for client Visual Studio Code 1.116.0.
+2026.10.18 21:01:32 INFO  time: initialize in 0.18s
+2026.10.18 21:01:32 INFO  Memory monitor started
+2026.10.18 21:01:40 WARN  Using H2 2.4.240 which is newer than the version Flyway has been verified with. The latest verified version of H2 is 2.3.232.
+2026.10.18 21:03:45 WARN  no build target for: C:\Users\dell\Desktop\nfs\src\main\java\MNISTDownloader.java
+2026.10.18 21:03:45 INFO  no build target found for C:\Users\dell\Desktop\nfs\src\main\java\MNISTDownloader.java. Using fallback presentation compiler.
+2026.10.18 21:03:49 WARN  no build target for: C:\Users\dell\Desktop\nfs\src\main\java\MNISTDownloader.java
+2026.10.18 21:03:49 INFO  no build target found for C:\Users\dell\Desktop\nfs\src\main\java\MNISTDownloader.java. Using fallback presentation compiler.
+Oct 18, 2026 9:03:49 PM org.eclipse.lsp4j.jsonrpc.RemoteEndpoint handleCancellation
+WARNING: Unmatched cancel notification for request id 1
+2026.10.18 21:03:49 INFO  no build target found for C:\Users\dell\Desktop\nfs\src\main\java\MNISTDownloader.java. Using fallback presentation compiler.
+Oct 18, 2026 9:03:51 PM org.eclipse.lsp4j.jsonrpc.RemoteEndpoint handleCancellation
+WARNING: Unmatched cancel notification for request id 4
+Oct 18, 2026 9:03:51 PM org.eclipse.lsp4j.jsonrpc.RemoteEndpoint handleCancellation
+WARNING: Unmatched cancel notification for request id 9
+Oct 18, 2026 9:03:51 PM org.eclipse.lsp4j.jsonrpc.RemoteEndpoint handleCancellation
+WARNING: Unmatched cancel notification for request id 10
+2026.10.18 21:03:53 INFO  no build target found for C:\Users\dell\Desktop\nfs\src\main\java\MNISTDownloader.java. Using fallback presentation compiler.
+2026.10.18 21:03:55 INFO  no build target found for C:\Users\dell\Desktop\nfs\src\main\java\MNISTDownloader.java. Using fallback presentation compiler.
+2026.10.18 21:03:55 INFO  no build target found for C:\Users\dell\Desktop\nfs\src\main\java\MNISTDownloader.java. Using fallback presentation compiler.
+2026.10.18 21:03:56 INFO  no build target found for C:\Users\dell\Desktop\nfs\src\main\java\MNISTDownloader.java. Using fallback presentation compiler.
+2026.10.18 21:03:55 INFO  no build target found for C:\Users\dell\Desktop\nfs\src\main\java\MNISTDownloader.java. Using fallback presentation compiler.
+2026.10.18 21:03:56 INFO  no build target found for C:\Users\dell\Desktop\nfs\src\main\java\MNISTDownloader.java. Using fallback presentation compiler.
+2026.10.18 21:03:56 INFO  Created report: Optional[file:///C:/Users/dell/Desktop/nfs/src/main/java/MNISTDownloader.java]
+2026.10.18 21:03:56 INFO  empty definition using pc, found symbol in pc: java/nio/file/Path#of(). (full report at: "C:\Users\dell\Desktop\nfs\.metals\.reports\metals-full\2026-10-18\r_empty-definition_21-03-57-395.md")
+2026.10.18 21:03:58 INFO  no build target found for C:\Users\dell\Desktop\nfs\src\main\java\MNISTDownloader.java. Using fallback presentation compiler.
+2026.10.18 21:04:04 INFO  no build target found for C:\Users\dell\Desktop\nfs\src\main\java\MNISTDownloader.java. Using fallback presentation compiler.

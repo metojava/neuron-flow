@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Getting Started - Java Deep Learning Framework</title>
+    <style>
+        body {font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6;}
+        h1, h2, h3 {color: #333;}
+        code {background: #f4f4f4; padding: 2px 4px; border-radius: 3px; font-size: 16px;}
+        pre {background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; font-size: 16px;}
+        .section {margin-bottom: 30px;}
+        .install {background: #e8f4fd; padding: 15px; border-radius: 5; border-left: 4px solid #2c5aa0;}
+        .note {background: #fff8e1; padding: 10px; border-radius: 5; margin: 10px 0;}
+    </style>
+</head>
+<body>
+
+<h1>Java Deep Learning Framework — Getting Started</h1>
+
+<p>Full chapter-by-chapter guide: <a href="newbook/index.html">newbook/index.html</a>.</p>
+
+<div class="section">
+    <h2>1. Prerequisites</h2>
+    <ul>
+        <li>Java 17 or later</li>
+        <li>Maven 3.6+</li>
+        <li>Internet access (first run downloads Fashion-MNIST data)</li>
+    </ul>
+    <p>The project uses the <code>jdk.incubator.vector</code> module for SIMD acceleration.
+    Maven adds it automatically at compile and test time.</p>
+</div>
+
+<div class="section">
+    <h2>2. Building from Scratch</h2>
+
+    <h3>2.1 Compile and Install</h3>
+    <pre>mvn clean install</pre>
+    <p>This compiles main sources, compiles test sources, runs all 42 tests, and installs the jar to your local Maven cache.</p>
+
+    <h3>2.2 Compile Only</h3>
+    <pre>mvn clean compile</pre>
+
+    <h3>2.3 Run Tests Only</h3>
+    <pre>mvn test</pre>
+    <p>Expected output:</p>
+    <pre>[INFO] Tests run: 42, Failures: 0, Errors: 0, Skipped: 0</pre>
+    <p>[INFO] BUILD SUCCESS</p>
+</div>
+
+<div class="section">
+    <h2>3. Building a Simple MLP</h2>
+    <p>This example trains a tiny multi-layer perceptron on XOR using the core
+    <code>layers</code> API. A ready-to-run copy lives at
+    <code>src/main/java/examples/SimpleMlpDemo.java</code>.</p>
+    <pre>package examples;
+
+import activations.ActivationFunction;
+import layers.NeuralNetwork;
+import losses.LossFunction;
+import optim.Adam;
+import training.Trainer;
+
+public final class SimpleMlpDemo {
+
+    public static void main(String[] args) {
+        float[][] inputs = {
+            {0f, 0f}, {0f, 1f}, {1f, 0f}, {1f, 1f}
+        };
+        float[][] targets = {
+            {0f}, {1f}, {1f}, {0f}
+        };
+
+        NeuralNetwork mlp = new NeuralNetwork(
+                new int[]{2, 8, 1},
+                new ActivationFunction[]{
+                        ActivationFunction.linear(),
+                        ActivationFunction.relu(),
+                        ActivationFunction.sigmoid()
+                },
+                LossFunction.meanSquaredError(),
+                new Adam(0.01f),
+                42L);
+
+        mlp.fit(new Trainer(2_000, 4, true, 42L), inputs, targets);
+
+        for (int i = 0; i < inputs.length; i++) {
+            float output = mlp.forwardPropagate(inputs[i])[0];
+            System.out.printf("%.0f XOR %.0f = %.4f (expected %.0f)%n",
+                    inputs[i][0], inputs[i][1], output, targets[i][0]);
+        }
+    }
+}</pre>
+
+    <p>The steps:</p>
+    <ol>
+        <li><strong>Data</strong> — four XOR rows as <code>float[][]</code> inputs and targets.</li>
+        <li><strong>Topology</strong> — <code>{2, 8, 1}</code>: 2 inputs, one hidden layer of 8 neurons, 1 output.</li>
+        <li><strong>Activations</strong> — one per layer: linear input, ReLU hidden, sigmoid output.</li>
+        <li><strong>Loss and optimizer</strong> — mean squared error with Adam (<code>0.01f</code> learning rate).</li>
+        <li><strong>Training</strong> — <code>Trainer(epochs, batchSize, shuffle, seed)</code> passed to <code>fit(...)</code>.</li>
+        <li><strong>Prediction</strong> — <code>forwardPropagate(...)</code> returns the output vector.</li>
+    </ol>
+
+    <h3>3.1 How to Run</h3>
+    <pre>mvn -q -DskipTests compile
+java --add-modules jdk.incubator.vector -cp target/classes examples.SimpleMlpDemo</pre>
+
+    <h3>3.2 Expected Output</h3>
+    <pre>Final loss: 0.000080
+0 XOR 0 = 0.0097 (expected 0)
+0 XOR 1 = 0.9915 (expected 1)
+1 XOR 0 = 0.9909 (expected 1)
+1 XOR 1 = 0.0085 (expected 0)</pre>
+</div>
+
+<div class="section">
+    <h2>4. Running the Example: Fashion-MNIST MLP</h2>
+
+    <h3>4.1 Run via Maven</h3>
+    <pre>mvn exec:java</pre>
+    <p>or</p>
+    <pre>mvn exec:java -Dexec.mainClass=projects.fashion-mnist.src.main.java.FashionMNISTApp</pre>
+
+    <h3>4.2 With Custom Batch Size</h3>
+    <pre>mvn exec:java -Dexec.args=64</pre>
+    <p>or</p>
+    <pre>mvn exec:java -Dexec.args=256</pre>
+
+    <h3>4.3 What the Example Does</h3>
+    <ul>
+        <li><strong>Topology:</strong> 784 (input) → 128 (hidden ReLU) → 10 (output)</li>
+        <li><strong>Optimizer:</strong> Adam, learning rate 0.001</li>
+        <li><strong>Loss:</strong> Softmax cross-entropy</li>
+        <li><strong>Epochs:</strong> 10</li>
+        <li><strong>Batch size:</strong> 32 (configurable)</li>
+        <li><strong>Data:</strong> Fashion-MNIST downloaded automatically</li>
+    </ul>
+
+    <h3>4.4 Expected Output</h3>
+    <pre>Train: 60000  Test: 10000
+Batch size: 32
+Initial training loss: 0.693145
+
+Epoch       Train loss   Accuracy   Time
+-------------------------------------------
+1           0.521872     78.40%     1.2 s
+2           0.394521     83.12%     1.1 s
+3           0.312456     85.67%     1.0 s
+4           0.251823     87.33%     0.9 s
+5           0.208123     88.45%     0.9 s
+6           0.175432     90.12%     0.8 s
+7           0.149231     91.22%     0.8 s
+8           0.124567     92.11%     0.7 s
+9           0.103456     92.88%     0.7 s
+10          0.085432     93.55%     0.7 s
+
+Training completed in 8.5 s
+Final training loss: 0.085432
+Test accuracy: 93.55% (5596/6000)
+
+Model saved to model/ as .bin / .json / .csv
+HTML report written to fashion-eval.html</pre>
+</div>
+
+<div class="section">
+    <h2>5. Project Structure</h2>
+    <table style="width: 100%; border-collapse: collapse;">
+        <tr style="background: #f0f0f0;">
+            <td style="padding: 8px;"><strong>Directory</strong></td>
+            <td style="padding: 8px;"><strong>Purpose</strong></td>
+        </tr>
+        <tr>
+            <td style="padding: 8px;">src/main/java/layers</td>
+            <td style="padding: 8px;">Dense, Conv2D, MaxPool2D, Sequential, Dropout, LSTM, GRU, Transformer</td>
+        </tr>
+        <tr>
+            <td style="padding: 8px;">src/main/java/activations</td>
+            <td style="padding: 8px;">17 activation functions (ReLU, Sigmoid, Tanh, GELU, Swish, Mish, SELU, ELU, Softplus, HardSwish, PReLU, etc.)</td>
+        </tr>
+        <tr>
+            <td style="padding: 8px;">src/main/java/optim</td>
+            <td style="padding: 8px;">SGD (momentum/weight-decay), Adam, AdamW (decoupled), NAG (Nesterov)</td>
+        </tr>
+        <tr>
+            <td style="padding: 8px;">src/main/java/losses</td>
+            <td style="padding: 8px;">Categorical cross-entropy, MSE, Huber, Hinge, softmaxCrossEntropy()</td>
+        </tr>
+        <tr>
+            <td style="padding: 8px;">src/main/java/data</td>
+            <td style="padding: 8px;">MNIST/Fashion-MNIST downloaders and loaders</td>
+        </tr>
+        <tr>
+            <td style="padding: 8px;">projects/</td>
+            <td style="padding: 8px;">15 demo projects each with pom.xml and *App.java</td>
+        </tr>
+        <tr>
+            <td style="padding: 8px;">src/test/java/</td>
+            <td style="padding: 8px;">42 JUnit 5 tests</td>
+        </tr>
+    </table>
+</div>
+
+<div class="section">
+    <h2>6. Adding a New Layer</h2>
+    <ol>
+        <li>Create a class in <code>src/main/java/layers/</code>.</li>
+        <li>Implement <code>forward(float[] x)</code> → output + cache for backward.</li>
+        <li>Implement <code>backward(float[] dOut)</code> → input gradient + accumulate dW/db.</li>
+        <li>Implement <code>update(float learningRate, int batchSize)</code> → apply accumulated gradients.</li>
+        <li>Add <code>parameterCount()</code>, <code>copyParametersTo/From()</code>, <code>copyGradientsTo/From()</code>, <code>zeroGrad()</code>.</li>
+        <li>Add a test in <code>src/test/java/layers/</code> following <code>Conv2DTest.java</code> or <code>DenseTest.java</code>.</li>
+    </ol>
+</div>
+
+<div class="section">
+    <h2>7. Adding a New Optimizer</h2>
+    <ol>
+        <li>Implement <code>optim.Optimizer</code> interface.</li>
+        <li>The interface has one method: <code>void update(float[] parameters, float[] gradients)</code>.</li>
+        <li>Maintain internal state (momentum, moving averages, timestep) as instance fields.</li>
+        <li>Follow existing patterns: <code>SGD.java</code>, <code>Adam.java</code>, <code>AdamW.java</code>, <code>NAG.java</code>.</li>
+        <li>Add tests in <code>src/test/java/optim/</code>.</li>
+    </ol>
+</div>
+
+<div class="section note">
+    <h2>8. License</h2>
+    <p>This project is part of the Java Deep Learning Framework (MIT-licensed, educational purposes).</p>
+</div>
+
+<footer style="margin-top: 40px; font-size: 0.9em; color: #666;">
+    Generated for NeuronFlow • <a href="https://github.com/example/neuronflow">GitHub</a>
+</footer>
+
+</body>
+</html>

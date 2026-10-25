@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>13 · Run it — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html">02 · Forward pass</a>
+      <a href="03-backprop.html">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses &amp; optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html">08 · Downloader &amp; loader</a>
+      <a href="09-keras-like.html">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html">10 · Evaluation &amp; confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html" class="active">13 · Run it</a>
+      <a href="14-full-walkthrough.html">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html">16 · Classical machine learning</a>
+      <a href="17-autograd.html">17 · Autograd</a>
+      <a href="18-transformers.html">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html">20 · GPT</a>
+      <a href="21-api-reference.html">21 · API reference</a>
+      <a href="performance.html">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Chapter 13</div>
+    <article>
+      <div class="eyebrow">13 · Run it</div>
+      <h1>Compile and run with Maven or the CLI</h1>
+      <p class="lead">This chapter shows how to compile and run the project on your machine. Two paths: Maven (recommended, handles the Vector API module flags for you) or plain <code>javac</code>/<code>java</code> if you prefer no build tool.</p>
+
+      <h2>13.1 Requirements</h2>
+      <ul>
+        <li><strong>JDK 17+</strong> (the project targets <code>--release 17</code>; the Vector API incubator module works on 17–23).</li>
+        <li><strong>Maven 3.8+</strong> (optional but convenient).</li>
+        <li>An internet connection for the first run — the Fashion-MNIST downloader fetches four gzip files (~30 MB total) from GitHub.</li>
+      </ul>
+
+      <h2>13.2 Run with Maven</h2>
+      <p>From the project root (the folder containing <code>pom.xml</code>):</p>
+      <pre><code># compile everything
+mvn compile
+
+# train the Fashion-MNIST classifier (downloads data on first run)
+mvn exec:exec
+
+# run tests, if any
+mvn test</code></pre>
+      <p><code>mvn exec:exec</code> forks a child JVM with the required <code>--add-modules jdk.incubator.vector</code> flag (configured in <code>pom.xml</code>) and launches <code>examples.FashionMNISTRunner</code>. The first run downloads the dataset into <code>data/fashion-mnist/</code>; subsequent runs reuse the cached files.</p>
+
+      <h2>13.3 Expected output</h2>
+      <pre><code>Loading Fashion-MNIST dataset...
+Already available: data\fashion-mnist\train-images-idx3-ubyte.gz
+Already available: data\fashion-mnist\train-labels-idx1-ubyte.gz
+Already available: data\fashion-mnist\t10k-images-idx3-ubyte.gz
+Already available: data\fashion-mnist\t10k-labels-idx1-ubyte.gz
+Fashion-MNIST files are ready in: C:\...\data\fashion-mnist
+Training examples: 60000
+Test examples: 10000
+Examples used for training: 8000
+
+Initial training loss: 2.494409
+
+Training (Keras-like simple model)...
+
+Epoch      Train loss    Accuracy     Time
+-------------------------------------------
+1          0.524989      80.63%       0.7 s
+2          0.456892      83.28%       0.5 s
+3          0.389585      85.78%       0.5 s
+...
+10         0.257187      90.50%       0.5 s
+
+Training completed in 7.2 s
+Final training loss: 0.257187
+Test accuracy: 84.07%
+
+Final evaluation:
+Test accuracy: 84.07% (8407/10000)
+
+Confusion matrix (rows = actual, cols = predicted):
+                0     1     2     3     4     5     6     7     8     9
+T-shirt/top    876     1    18    23     3     0    63     0    16     0
+Trouser          9   960     1    22     5     0     1     0     2     0
+...
+Ankle boot       1     0     0     1     0    11     1   107     2   877
+
+class         precision     recall         f1
+T-shirt/top       0.727      0.876      0.795
+Trouser           0.982      0.960      0.971
+...</code></pre>
+
+      <h2>13.4 Run without Maven</h2>
+      <p>Compile every source file, then run with the vector module enabled:</p>
+      <pre><code># from the project root
+javac --add-modules jdk.incubator.vector \
+      -d out \
+      $(find src/main/java -name "*.java")
+
+java --add-modules jdk.incubator.vector \
+     -cp out \
+     examples.FashionMNISTRunner</code></pre>
+      <p>On Windows PowerShell, replace <code>$(find ...)</code> with an explicit file list or use:</p>
+      <pre><code>Get-ChildItem -Recurse src/main/java/*.java |
+  ForEach-Object { $_.FullName } |
+  javac --add-modules jdk.incubator.vector -d out @()</code></pre>
+
+      <h2>13.5 Why <code>--add-modules jdk.incubator.vector</code>?</h2>
+      <p>The Vector API lives in the <code>jdk.incubator.vector</code> module, which is not resolved by default. Both <code>javac</code> (to compile <code>VectorMath</code>) and <code>java</code> (to load the classes at runtime) need the flag. Forgetting it at run time produces:</p>
+      <pre><code>java.lang.NoClassDefFoundError: jdk/incubator/vector/Vector</code></pre>
+
+      <div class="note"><strong>Speed.</strong> With the Vector API active, each training epoch on the 8,000-example subset takes roughly 0.5 s instead of 2 s — about a 4× speedup on the forward and backward inner loops. The accuracy is identical; only the wall-clock time changes.</div>
+
+      <h2>13.6 Saving and loading models</h2>
+      <p>The network can save its topology + parameters to disk in three formats, chosen by file extension or explicitly via the <code>ModelFormat</code> enum:</p>
+      <pre><code>// inferred from extension
+net.saveModel(Path.of("model.bin"));    // BINARY
+net.saveModel(Path.of("model.json"));   // JSON
+net.saveModel(Path.of("model.csv"));    // CSV
+
+// explicit format
+net.saveModel(Path.of("model.dat"), ModelFormat.BINARY);
+
+// reload — pass the constructor arguments again
+NeuralNetwork net2 = NeuralNetwork.loadModel(
+    Path.of("model.json"),
+    ModelFormat.JSON,
+    activations, lossFunction, optimizer, seed, initializer);</code></pre>
+      <ul>
+        <li><strong>BINARY</strong> (<code>.bin</code>) — compact <code>DataOutputStream</code> format. Smallest file, fastest load.</li>
+        <li><strong>JSON</strong> (<code>.json</code>) — human-readable, diff-friendly. Larger but easy to inspect or load from other languages.</li>
+        <li><strong>CSV</strong> (<code>.csv</code>) — one row per neuron, one column per weight. Opens directly in a spreadsheet.</li>
+      </ul>
+      <div class="note"><strong>Round-trip verified.</strong> A model saved and reloaded in any of the three formats produces identical predictions to the in-memory original (verified on 500 Fashion-MNIST test images).</div>
+
+      <h2>13.7 HTML evaluation report</h2>
+      <p>After training, <code>HtmlReport.write()</code> produces a self-contained HTML file with the confusion matrix, per-class precision/recall/F1, and a gallery of test images grouped by true class — each image embedded as a base64 PNG data URI, so the file needs no external assets:</p>
+      <pre><code>HtmlReport.write(
+    Path.of("fashion-eval.html"),
+    confusion, FashionMNISTLoader.CLASS_NAMES,
+    testImages, testLabels, predicted,
+    2  // upscale factor: 28x28 -> 56x56
+);</code></pre>
+
+      <h2>13.8 Project layout (current)</h2>
+      <pre><code>src/main/java/
+├── activations/
+│   ├── ActivationFunction.java   # sigmoid, tanh, relu, leakyRelu, linear,
+│   │                              # elu, selu, swish, gelu, softplus
+│   └── Softmax.java
+├── data/
+│   ├── MNISTDownloader.java      # generic gzip IDX downloader
+│   ├── MNISTLoader.java          # generic IDX parser + resolve() + one-hot
+│   ├── FashionMNISTDownloader.java
+│   └── FashionMNISTLoader.java   # CLASS_NAMES, NUM_CLASSES, Dataset
+├── evaluation/
+│   ├── ClassificationMetrics.java # argmax, accuracy, confusion, P/R/F1
+│   ├── HtmlReport.java            # self-contained HTML report
+│   └── ImageEncoder.java          # float[] -> base64 PNG data URI
+├── examples/
+│   ├── FashionMNISTRunner.java
+│   ├── MNISTRunner.java
+│   └── Main.java
+├── initialization/
+│   └── WeightInitializer.java    # xavierUniform, heNormal
+├── layers/
+│   ├── Neuron.java
+│   ├── Layer.java
+│   ├── NeuralNetwork.java        # forward, loss, backprop, fit, save/load
+│   ├── ModelFormat.java          # BINARY, JSON, CSV
+│   ├── Dropout.java
+│   ├── BatchNormalization.java
+│   ├── Flatten.java                 # flatten / unflatten, channel-first variants
+│   ├── Conv2D.java                  # stride-1 plane SIMD path, backward, parameter copies
+│   ├── MaxPool2D.java               # forward with argmax cache, backward
+│   ├── Dense.java                   # flat row-major weights, SIMD forward/backward
+│   ├── ConvClassifier.java          # Conv-Pool-Conv-Pool-Dense-Dense image classifier
+│   └── DenseClassifier.java         # Dense(ReLU) stack, optional Adam on flat parameters
+├── losses/
+│   ├── LossFunction.java         # MSE, BCE, softmax cross-entropy
+│   ├── HingeLoss.java
+│   ├── HuberLoss.java
+│   ├── KLDivergenceLoss.java
+│   ├── CategoricalCrossEntropyLoss.java
+│   └── PoissonLoss.java
+├── optim/
+│   ├── Optimizer.java
+│   ├── SGD.java
+│   ├── Adam.java
+│   ├── RMSProp.java
+│   ├── Adagrad.java
+│   └── Nadam.java
+├── regularizers/
+│   ├── L1Regularizer.java
+│   ├── L2Regularizer.java
+│   └── ElasticNetRegularizer.java
+├── training/
+│   ├── Trainer.java                 # epochs, batch size, shuffle, seed
+│   ├── TrainableClassifier.java     # flat parameter / gradient interface
+│   └── DataParallelTrainer.java     # mini-batch SGD split across worker threads
+└── vector/
+    └── VectorMath.java              # SIMD dot, axpy, axpyRange, dotRange, relu
+
+projects/
+├── fashion-mnist/                   # FashionCNNApp (CNN), FashionMnistKerasLike,
+│                                    #   FashionMNISTApp (dense MLP, HTML report)
+└── mnist/                           # standalone Maven demo</code></pre>
+
+      <h2>13.9 Fashion-MNIST projects: arguments and examples</h2>
+      <p>The standalone project <code>projects/fashion-mnist</code> has three entry points. Run Maven commands from that folder, after <code>mvn -B -q install -DskipTests</code> in the repository root.</p>
+      <table>
+        <tr><th>Class</th><th>Arguments (positional, all optional)</th></tr>
+        <tr><td><code>FashionCNNApp</code></td><td><code>trainLimit epochs batchSize testLimit compact threads</code> (defaults 60000 1 128 10000 true min(4, cores))</td></tr>
+        <tr><td><code>FashionMnistKerasLike</code></td><td><code>trainLimit epochs batchSize testLimit [compact, ignored] threads</code> (defaults 60000 10 32 10000, threads min(4, cores))</td></tr>
+        <tr><td><code>FashionMNISTApp</code></td><td><code>batchSize</code> (dense MLP, 10 epochs, saves model and HTML report)</td></tr>
+      </table>
+      <p>With Maven, <code>mvn exec:exec</code> maps its properties onto the first positional arguments in the order <code>runArgs</code>, <code>cnnEpochs</code>, <code>batchSize</code>, <code>testLimit</code>, <code>compact</code>. Select the class with <code>mainClass</code>. Run <code>compile</code> first, because <code>exec:exec</code> does not compile:</p>
+      <pre><code>mvn compile exec:exec -DmainClass=FashionCNNApp -DcnnEpochs=5 -DbatchSize=256
+
+mvn compile exec:exec -DmainClass=FashionMnistKerasLike -DrunArgs=60000 -DcnnEpochs=10 -DbatchSize=128 -DtestLimit=10000</code></pre>
+      <p>Running a class directly with <code>java</code> also lets you set the thread count:</p>
+      <pre><code>java --add-modules jdk.incubator.vector -cp "target\classes;..\..\target\classes" FashionCNNApp 60000 5 256 10000 true 4</code></pre>
+      <div class="note"><strong>Vector API everywhere.</strong> The library's convolution and dense layers use <code>jdk.incubator.vector</code>, so every run needs <code>--add-modules jdk.incubator.vector</code>. The project's <code>pom.xml</code> adds it for compile and <code>exec:exec</code>.</div>
+
+      <div class="paging">
+        <a href="12-swing-ui.html">← 12 · Swing/AWT window</a>
+        <a href="14-full-walkthrough.html">14 · Full code →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

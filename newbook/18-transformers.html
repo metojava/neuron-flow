@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>18 · Transformers — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html">02 · Forward pass</a>
+      <a href="03-backprop.html">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses & optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html">08 · Downloader & loader</a>
+      <a href="09-keras-like.html">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html">10 · Evaluation & confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html">13 · Run it</a>
+      <a href="14-full-walkthrough.html">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html">16 · Classical machine learning</a>
+      <a href="17-autograd.html">17 · Autograd</a>
+      <a href="18-transformers.html" class="active">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html">20 · GPT</a>
+      <a href="21-api-reference.html">21 · API reference</a>
+      <a href="22-training.html">22 · Training infrastructure</a>
+      <a href="23-generation.html">23 · Generation</a>
+      <a href="24-serialization.html">24 · Serialization</a>
+      <a href="25-mixed-precision.html">25 · Mixed precision</a>
+      <a href="26-ddp.html">26 · Distributed training</a>
+      <a href="27-export.html">27 · Export</a>
+      <a href="performance.html">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Chapter 18</div>
+    <article>
+      <div class="eyebrow">18 · Transformers</div>
+      <h1>Encoder and decoder blocks built on autograd</h1>
+      <p class="lead">The <code>transformers</code> package assembles attention, layer normalisation and feed-forward layers into encoder (BERT-style) and decoder (GPT-style) stacks. Every parameter is an <code>autograd.Tensor</code>, so gradients come from the engine in chapter 17.</p>
+
+      <h2>18.1 Two transformer implementations</h2>
+      <p>NeuronFlow contains two attention implementations, and they serve different stacks:</p>
+      <table>
+        <tr><th>Package</th><th>Numeric type</th><th>Style</th><th>Intended use</th></tr>
+        <tr><td><code>layers</code></td><td><code>double</code></td><td>Explicit forward/backward inside <code>NeuralNetwork</code></td><td>Attention as a layer in the dense network and CNN demos.</td></tr>
+        <tr><td><code>transformers</code></td><td><code>float</code></td><td>Composable objects returning <code>Tensor</code></td><td>Encoder/decoder language models on the autograd engine.</td></tr>
+      </table>
+      <p>This chapter covers the second. The classes are <code>Embedding</code>, <code>Linear</code>, <code>LayerNorm</code>, <code>FeedForward</code>, <code>MultiHeadAttention</code>, <code>TransformerBlock</code>, <code>TransformerEncoder</code>, <code>TransformerDecoder</code>, <code>PositionalEmbedding</code>, and supporting classes.</p>
+
+      <h2>18.2 Shapes and conventions</h2>
+      <table>
+        <tr><th>Symbol</th><th>Meaning</th></tr>
+        <tr><td><code>B</code></td><td>Batch size (number of sequences).</td></tr>
+        <tr><td><code>T</code></td><td>Sequence length (tokens per sequence).</td></tr>
+        <tr><td><code>D</code></td><td>Model width, <code>dModel</code>.</td></tr>
+        <tr><td><code>H</code></td><td>Number of attention heads; <code>D</code> must be divisible by <code>H</code>.</td></tr>
+        <tr><td><code>dH</code></td><td>Head width, <code>D / H</code>.</td></tr>
+        <tr><td><code>V</code></td><td>Vocabulary size.</td></tr>
+        <tr><td><code>F</code></td><td>Feed-forward hidden width, usually <code>4D</code>.</td></tr>
+      </table>
+      <p>Token ids are passed as a flat <code>int[]</code> of length <code>B*T</code> in row-major order. Hidden states are always <code>{B,T,D}</code>. Padding masks are supported via boolean arrays <code>boolean[B][T]</code> where <code>true</code> marks padding positions.</p>
+
+      <h2>18.3 Building blocks</h2>
+
+      <h3>Embedding</h3>
+      <p>A trainable lookup table of shape <code>{V,D}</code>, initialised from <code>N(0, 0.02²)</code>. <code>forward(ids, B, T)</code> returns <code>{B,T,D}</code>; the backward pass scatters gradients back into the rows that were used.</p>
+      <pre><code>Embedding embedding = new Embedding(vocabSize, dModel, seed);
+Tensor x = embedding.forward(ids, batchSize, seqLen);</code></pre>
+
+      <h3>Linear</h3>
+      <p>An affine projection of the last dimension: <code>out = x @ W + b</code>. Weights use He-normal initialisation <code>N(0, 2/inFeatures)</code>; the bias starts at zero. Leading dimensions are flattened and restored, so the layer works on <code>{B,T,in}</code> as well as <code>{N,in}</code>. Supports weight tying for LM heads via <code>tieWeights()</code> and shared-weight constructor.</p>
+      <pre><code>Linear projection = new Linear(dModel, vocabulary, seed);
+Tensor logits = projection.forward(hiddenStates);   // {B,T,vocab}</code></pre>
+
+      <h3>LayerNorm</h3>
+      <p>Normalises the last dimension with learnable <code>gamma</code> (initialised to 1) and <code>beta</code> (initialised to 0):</p>
+      <div class="formula">
+        y = γ · (x - μ) / √(σ² + ε) + β &nbsp;&nbsp;&nbsp; ε = 1e-5
+      </div>
+
+      <h3>FeedForward</h3>
+      <p>Two linear layers with GELU in between: <code>Linear(D,F) → GELU → Linear(F,D)</code>. It is applied independently at every position.</p>
+      <pre><code>FeedForward ffn = new FeedForward(dModel, 4 * dModel, seed);</code></pre>
+
+      <h3>MultiHeadAttention</h3>
+      <p>Self-attention with four projections: query, key, value and output. The input <code>{B,T,D}</code> is split into <code>H</code> heads of width <code>dH</code>, then</p>
+      <div class="formula">
+        Attention(Q,K,V) = softmax(QK<sup>T</sup> / √dH) V
+      </div>
+      <p><code>forward(x, true)</code> adds a causal mask, so position <code>t</code> can only attend to positions <code>≤ t</code>; <code>forward(x)</code> and <code>forward(x, false)</code> are bidirectional. The mask is a <code>{T,T}</code> tensor with <code>-1e9</code> above the diagonal, broadcast over batch and heads.</p>
+      <p>Optional features:</p>
+      <ul>
+        <li><strong>RoPE (Rotary Positional Embeddings):</strong> Enable with <code>useRoPE=true</code> in constructor; precomputes cos/sin tables up to <code>maxSeqLen</code>.</li>
+        <li><strong>Key padding mask:</strong> Pass <code>boolean[][] keyPaddingMask</code> to <code>forward</code>; <code>true</code> masks padding positions.</li>
+        <li><strong>Dropout:</strong> Attention weight dropout and output projection dropout configurable via constructor.</li>
+        <li><strong>KV cache:</strong> Pass <code>pastK</code>, <code>pastV</code>, <code>pastLen</code> to <code>forward</code> for autoregressive generation; returns updated K/V tensors.</li>
+      </ul>
+
+      <h3>TransformerBlock</h3>
+      <p>Pre-normalised residual block with residual dropout:</p>
+      <div class="formula">
+        h = x + Dropout(Attention(LayerNorm(x))) &nbsp;&nbsp;&nbsp; y = h + Dropout(FeedForward(LayerNorm(h)))
+      </div>
+      <p>The boolean <code>useCausal</code> selects decoder-style or encoder-style attention. Supports KV cache and key padding mask.</p>
+
+      <h3>PositionalEmbedding</h3>
+      <p>Combines token embeddings, learned positional embeddings, and optional segment embeddings (for BERT).</p>
+      <pre><code>PositionalEmbedding posEmb = new PositionalEmbedding(vocabSize, dModel, maxSeqLen, typeVocabSize, useSegments, seed);
+Tensor x = posEmb.forward(tokenIds, segmentIds, B, T);  // {B,T,D}</code></pre>
+      <p>Can also accept pre-computed token embeddings via <code>forward(tokenEmbs, segmentIds, B, T)</code>.</p>
+
+      <h3>TransformerBlock</h3>
+      <p>Pre-normalised residual block with residual dropout:</p>
+      <div class="formula">
+        h = x + Dropout(Attention(LayerNorm(x))) &nbsp;&nbsp;&nbsp; y = h + Dropout(FeedForward(LayerNorm(h)))
+      </div>
+      <p>The boolean <code>useCausal</code> selects decoder-style or encoder-style attention. Supports KV cache and key padding mask.</p>
+
+      <h3>Encoder and decoder stacks</h3>
+      <p><code>TransformerEncoder</code> and <code>TransformerDecoder</code> wrap an embedding, a list of <code>numLayers</code> blocks and a final layer norm. The encoder passes <code>false</code> to every block; the decoder passes <code>true</code>. Both expose <code>parameters()</code>, which concatenates every trainable tensor in the stack.</p>
+      <pre><code>TransformerEncoder encoder = new TransformerEncoder(
+        vocabSize, dModel, numHeads, numLayers, ffnHidden, seed);
+
+TransformerDecoder decoder = new TransformerDecoder(
+        vocabSize, dModel, numHeads, numLayers, ffnHidden, seed);
+
+// With configs:
+TransformerEncoder encoder = new TransformerEncoder(BertConfig.bertBaseUncased(), 42L);
+TransformerDecoder decoder = new TransformerDecoder(GPTConfig.gpt2Small(), 42L);
+
+// Forward with padding mask:
+Tensor states = encoder.forward(ids, segmentIds, B, T, keyPaddingMask);
+Tensor states = decoder.forward(ids, B, T, pastK, pastV, pastLen, keyPaddingMask);
+List<Tensor> parameters = decoder.parameters();</code></pre>
+
+      <table>
+        <tr><th>Constructor</th><th>Parameters</th></tr>
+        <tr><td><code>Embedding(V, D, seed)</code></td><td>Vocabulary size, embedding width, RNG seed.</td></tr>
+        <tr><td><code>Linear(in, out, seed)</code></td><td>Input and output widths, RNG seed.</td></tr>
+        <tr><td><code>LayerNorm(D)</code></td><td>Width of the normalised dimension.</td></tr>
+        <tr><td><code>FeedForward(D, F, seed)</code></td><td>Model width and hidden width.</td></tr>
+        <tr><td><code>MultiHeadAttention(D, H, seed)</code></td><td>Model width, head count; requires <code>D % H == 0</code>.</td></tr>
+        <tr><td><code>TransformerBlock(D, H, F, seed)</code></td><td>Model width, heads and feed-forward width.</td></tr>
+        <tr><td><code>TransformerEncoder(V, D, H, L, F, seed)</code></td><td>Vocabulary, model width, heads, layers, hidden width.</td></tr>
+        <tr><td><code>TransformerDecoder(V, D, H, L, F, seed)</code></td><td>Same arguments; causal masking enabled.</td></tr>
+        <tr><td><code>PositionalEmbedding(V, D, maxT, types, segments, seed)</code></td><td>Vocab, width, max seq len, segment vocab, segments flag, seed.</td></tr>
+      </table>
+
+      <h2>18.4 Parameter count</h2>
+      <p>For one block, attention has <code>4·(D² + D)</code> parameters (four projections with biases), and the feed-forward has <code>2·(D·F) + D + F</code>. Add <code>4·D</code> for the two layer norms. The stack adds <code>V·D</code> for the embedding plus <code>2·D</code> for the final norm. For <code>D=128, H=4, F=512, L=4, V=1000</code> that is roughly 1.4 million parameters.</p>
+
+      <h2>18.5 A decoder language-model step</h2>
+      <p>The stack returns hidden states, not logits. Add a language-model head and shift the targets so position <code>t</code> predicts token <code>t+1</code>:</p>
+      <pre><code>import autograd.Ops;
+import autograd.Tensor;
+import transformers.Linear;
+import transformers.TransformerDecoder;
+
+import java.util.List;
+
+int vocab = 256;
+int dModel = 32;
+int heads = 4;
+int layers = 2;
+int ffn = 128;
+int batch = 4;
+int seqLen = 16;
+
+TransformerDecoder decoder = new TransformerDecoder(
+        vocab, dModel, heads, layers, ffn, 42L);
+Linear lmHead = new Linear(dModel, vocab, 99L);
+List<Tensor> parameters = new java.util.ArrayList<>(decoder.parameters());
+parameters.addAll(lmHead.parameters());
+
+int[] tokens = new int[batch * seqLen];
+// ... fill tokens with ids in [0, vocab) ...
+int[] nextTokens = new int[batch * seqLen];
+// ... nextTokens[i] = tokens[i + 1] inside each sequence ...
+
+Tensor hidden = decoder.forward(tokens, batch, seqLen);     // {B,T,D}
+Tensor logits = lmHead.forward(hidden);                     // {B,T,V}
+Tensor loss = Ops.crossEntropy(logits, nextTokens);         // scalar mean
+
+for (Tensor p : parameters) {
+    p.zeroGrad();
+}
+loss.backward();
+
+float learningRate = 0.01f;
+for (Tensor p : parameters) {
+    float[] values = p.data();
+    float[] gradients = p.grad();
+    for (int i = 0; i < values.length; i++) {
+        values[i] -= learningRate * gradients[i];
+    }
+}
+System.out.println("loss " + loss.get(0));</code></pre>
+      <p><code>Ops.crossEntropy</code> flattens <code>{B,T,V}</code> internally, so the target array has length <code>B*T</code>. Masking makes the prediction at position <code>t</code> depend only on positions <code>0..t</code>; that is what makes next-token training valid.</p>
+
+      <h2>18.6 What is missing (and what was added)</h2>
+      <p>The following items from the original "missing" list have been <strong>implemented</strong>:</p>
+      <ul>
+        <li><strong>Positional embeddings:</strong> <code>PositionalEmbedding</code> provides token + learned positional + optional segment embeddings.</        <li><strong>Padding mask:</strong> <code>keyPaddingMask</code> in <code>MultiHeadAttention</code>, <code>TransformerBlock</code>, <code>TransformerEncoder</code>, <code>TransformerDecoder</code>.
+        <li><strong>Dropout:</strong> Attention dropout, projection dropout, and residual dropout in <code>MultiHeadAttention</code> and <code>TransformerBlock</code>.
+        <li><strong>KV cache:</strong> <code>TransformerDecoder.forward</code> and <code>TransformerBlock</code> support KV cache for autoregressive generation.
+        <li><strong>RoPE:</strong> Rotary positional embeddings in <code>MultiHeadAttention</code> with <code>useRoPE=true</code>.
+        <li><strong>Tokenizers:</strong> BPE tokenizer in <code>transformers.Tokenizer</code> with special tokens, padding, truncation, <code>encodePlus</code>, <code>batchEncodePlus</code>.
+        <li><strong>KV cache + generation:</strong> <code>TransformerDecoder.generate</code>, <code>GPTLMHeadModel.generate</code>, <code>BeamSearchDecoder</code>.
+        <li><strong>Temperature/top-k/top-p sampling:</strong> Implemented in <code>GPTLMHeadModel.generate</code> and <code>BeamSearchDecoder</code>.
+        <li><strong>Repetition penalty & stop sequences:</strong> Implemented in <code>GPTLMHeadModel.generate</code>.
+        <li><strong>KV cache + generation:</strong> <code>TransformerDecoder.generate</code>, <code>GPTLMHeadModel.generate</code>, <code>BeamSearchDecoder</code>.
+        <li><strong>KV cache + generation:</strong> <code>TransformerDecoder.generate</code>, <code>GPTLMHeadModel.generate</code>, <code>BeamSearchDecoder</code>.
+        <li><strong>Weight tying:</strong> <code>Linear.tieWeights()</code> and shared-weight constructor.
+        <li><strong>KV cache + generation:</strong> <code>TransformerDecoder.generate</code>, <code>GPTLMHeadModel.generate</code>, <code>BeamSearchDecoder</code>.
+        <li><strong>KV cache + generation:</strong> <code>TransformerDecoder.generate</code>, <code>GPTLMHeadModel.generate</code>, <code>BeamSearchDecoder</code>.
+        <li><strong>Training utilities:</strong> <code>AdamW</code> (decoupled weight decay), <code>LRScheduler</code> (linear warmup + cosine decay), <code>Trainer</code> (gradient accumulation, logging, checkpointing), gradient clipping.
+        <li><strong>Mixed precision:</strong> <code>MixedPrecisionContext</code> with dynamic loss scaling.
+        <li><strong>DDP hooks:</strong> <code>DDPHooks.DistributedDataParallel</code> with gradient bucket all-reduce.
+        <li><strong>Weight loading:</strong> <code>ModelSerializer</code> (save/load), <code>SafetensorsLoader</code>, <code>HFWeightLoader</code> (HF name mapping).
+        <li><strong>ONNX export:</strong> <code>ONNXExporter</code> skeleton.
+        <li><strong>Beam search:</strong> <code>BeamSearchDecoder</code> with length penalty.
+        <li><strong>Perplexity evaluation:</strong> <code>PerplexityEvaluator</code>.
+      </ul>
+
+      <p>Remaining gaps:</p>
+      <ul>
+        <li><strong>Cross-attention:</strong> The decoder is self-attention only; encoder–decoder models need a second attention sublayer with encoder keys/values.</li>
+        <li><strong>Fused kernels:</strong> No fused attention kernel, no memory-efficient attention, no flash attention (Vector API support pending).</li>
+        <li><strong>Distributed training:</strong> DDP hooks are scaffolding; real all-reduce needs NCCL/MPI integration.</li>
+        <li><strong>Quantization:</strong> No INT8/INT4 quantization for inference.</li>
+        <li><strong>LoRA/PEFT:</strong> No low-rank adapter support yet.</        <li><strong>Full HF compatibility:</strong> Weight loading works for basic shapes but doesn't cover all HF architectures.</li>
+      </ul>
+
+      <div class="note"><strong>Precision.</strong> The transformer stack is float32. For numerical debugging, compare against a double implementation of the same shapes; layer norm's <code>eps</code> is fixed at <code>1e-5</code>. <code>MixedPrecisionContext</code> provides dynamic FP16 loss scaling.</div>
+
+      <div class="paging">
+        <a href="17-autograd.html">← 17 · Autograd</a>
+        <a href="19-bert.html">19 · BERT →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

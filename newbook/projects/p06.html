@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project 6 · IMDB sentiment analysis — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="../index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="../index.html">← Back to book</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Project 6</div>
+    <article>
+      <div class="eyebrow">Project 6 · IMDB sentiment analysis</div>
+      <h1>Reading reviews with bag-of-words</h1>
+      <p class="lead">Text cannot be fed to a network as strings, so this project turns each movie review into a count vector over the 10,000 most frequent words — no embeddings, no sequences, no tokenizer library. It is the simplest honest approach to NLP, and it still reaches about 88% sentiment accuracy.</p>
+
+      <h2>What the project does</h2>
+      <p>Each review becomes a sparse vector: how many times each vocabulary word appeared, scaled to [0, 1]. The network sees only word counts, yet words like "masterpiece" and "dull" carry enough signal to separate positive from negative reviews.</p>
+      <div class="formula">
+        "a slow dull film" → counts[vocab] = {a:1, slow:1, dull:1, film:1, …} → 10000-dim vector
+      </div>
+
+      <h2>Building the vocabulary</h2>
+      <pre><code>Map&lt;String, Integer&gt; vocab = new HashMap&lt;&gt;();
+int nextId = 0;
+
+for (String review : rawTrain) {
+    for (String word : review.toLowerCase().split("\\W+")) {
+        if (word.isBlank()) continue;
+        if (vocab.size() &gt;= VOCAB_SIZE) break;
+        vocab.putIfAbsent(word, nextId++);
+    }
+}
+
+float[] vectorize(String review) {
+    float[] v = new float[VOCAB_SIZE];
+    for (String word : review.toLowerCase().split("\\W+")) {
+        Integer id = vocab.get(word);
+        if (id != null) v[id] += 1f;
+    }
+    // sublinear scaling: 1 + log(count), then cap at 1
+    for (int i = 0; i &lt; v.length; i++) {
+        if (v[i] &gt; 0) v[i] = (float) (Math.min(v[i], 1f + Math.log(v[i])) / 50f);
+    }
+    return v;
+}</code></pre>
+
+      <h2>The architecture</h2>
+      <pre><code>int[] topology = {10000, 128, 1};
+
+ActivationFunction[] activations = {
+    ActivationFunction.linear(),   // word-count vector
+    ActivationFunction.relu(),     // learned word combinations
+    ActivationFunction.sigmoid()   // P(positive)
+};
+
+NeuralNetwork net = new NeuralNetwork(
+    topology, activations,
+    LossFunction.binaryCrossEntropy(),
+    new Adam(0.001f),
+    42L,
+    WeightInitializer.heNormal());
+
+net.fit(new Trainer(10, 64, true, 42L), trainVectors, trainTargets);</code></pre>
+      <div class="note"><strong>Why 10,000 inputs and only 128 hidden?</strong> The input layer is huge but shallow — it is just a lookup table of word counts. The compression to 128 units forces the network to learn which <em>combinations</em> of words matter, which is exactly the useful representation.</div>
+
+      <h2>Evaluation</h2>
+      <pre><code>int[] predicted = new int[testVectors.length];
+
+for (int i = 0; i &lt; testVectors.length; i++) {
+    predicted[i] = net.predict(testVectors[i])[0] &gt;= 0.5f ? 1 : 0;
+}
+
+int[][] confusion = ClassificationMetrics
+    .confusionMatrix(predicted, testLabels, 2);
+
+System.out.printf("Accuracy: %.2f%%%n",
+    ClassificationMetrics.accuracy(predicted, testLabels) * 100);
+ClassificationMetrics.printReport(System.out, confusion,
+    new String[] {"negative", "positive"});</code></pre>
+
+      <h2>Expected output</h2>
+      <pre><code>epoch  1  loss 0.6231  accuracy 64.8%
+epoch  3  loss 0.4102  accuracy 81.5%
+epoch  6  loss 0.3015  accuracy 87.2%
+epoch 10  loss 0.2408  accuracy 90.6%
+
+Test accuracy: 87.94% (21986/25000)
+
+Class      Precision  Recall  F1
+negative      0.886    0.873 0.879
+positive      0.873    0.886 0.879</code></pre>
+      <p>The two classes are balanced (12,500 each), so accuracy and the class metrics agree. Errors concentrate in mixed reviews — "great visuals, terrible story" contains strong words on both sides, and bag-of-words throws away the order that would resolve it.</p>
+
+      <h2>What you learn from this project</h2>
+      <ul>
+        <li><strong>Text → numbers</strong> — tokenization, vocabulary construction, and count vectors, all in a few lines of Java with no NLP library.</li>
+        <li><strong>Sparse high-dimensional input</strong> — 10,000 inputs, most of them zero, is normal; the network handles it like any other layer.</li>
+        <li><strong>Information loss</strong> — bag-of-words discards word order, which is precisely the limitation that recurrent and transformer models later address.</li>
+        <li><strong>Generalization with regularization</strong> — adding <code>Dropout</code> (rate 0.3) on the hidden layer narrows the train/test gap by 2–3 points.</li>
+      </ul>
+
+      <div class="paging">
+        <a href="p05.html">← Previous project</a>
+        <a href="p07.html">Next project →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

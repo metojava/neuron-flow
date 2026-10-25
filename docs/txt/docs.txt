@@ -1,0 +1,1615 @@
+I'll turn your current Java neural network into a reusable, extensible deep learning framework, keeping `Neuron`, `Layer`, `NeuralNetwork`, and `Main` as the foundation while adding the capabilities we discussed.
+
+I'll use plain Java with no external dependencies so the implementation remains easy to compile, understand, and extend. The design will support both educational experimentation and more robust training workflows.
+
+The important change is to separate the framework into components: layers handle computations, activation functions handle nonlinearities, loss functions measure prediction error, optimizers update parameters, and the training engine coordinates the process.
+
+## 1. Target architecture
+
+Project structure
+
+src/ ├── Neuron.java ├── Layer.java ├── NeuralNetwork.java ├── ActivationFunction.java ├── LossFunction.java ├── Optimizer.java ├── SGD.java ├── Adam.java ├── Trainer.java ├── ModelIO.java ├── Metrics.java └── Main.java
+
+The implementation below establishes the core engine first. It retains the existing `Neuron` and `Layer` concepts and adds configurable activations, loss functions, mini-batch training, optimizers, validation, early stopping, metrics, and model persistence. Advanced layer types can then use the same modular design.
+
+## 2. Activation functions
+
+Create `ActivationFunction.java`.
+
+java
+```
+
+public interface ActivationFunction {
+    double activate(double x);
+
+    // Derivative expressed in terms of the activated output.
+    double derivativeFromOutput(double output);
+
+    static ActivationFunction sigmoid() {
+        return new ActivationFunction() {
+            @Override
+            public double activate(double x) {
+                if (x >= 0.0) {
+                    return 1.0 / (1.0 + Math.exp(-x));
+                }
+                double e = Math.exp(x);
+                return e / (1.0 + e);
+            }
+
+            @Override
+            public double derivativeFromOutput(double y) {
+                return y * (1.0 - y);
+            }
+        };
+    }
+
+    static ActivationFunction tanh() {
+        return new ActivationFunction() {
+            public double activate(double x) {
+                return Math.tanh(x);
+            }
+
+            public double derivativeFromOutput(double y) {
+                return 1.0 - y * y;
+            }
+        };
+    }
+
+    static ActivationFunction relu() {
+        return new ActivationFunction() {
+            public double activate(double x) {
+                return Math.max(0.0, x);
+            }
+
+            public double derivativeFromOutput(double y) {
+                return y > 0.0 ? 1.0 : 0.0;
+            }
+        };
+    }
+
+    static ActivationFunction leakyRelu(double alpha) {
+        if (alpha < 0.0) {
+            throw new IllegalArgumentException("alpha must be non-negative");
+        }
+
+        return new ActivationFunction() {
+            public double activate(double x) {
+                return x >= 0.0 ? x : alpha * x;
+            }
+
+            public double derivativeFromOutput(double y) {
+                return y > 0.0 ? 1.0 : alpha;
+            }
+        };
+    }
+
+    static ActivationFunction linear() {
+        return new ActivationFunction() {
+            public double activate(double x) {
+                return x;
+            }
+
+            public double derivativeFromOutput(double y) {
+                return 1.0;
+            }
+        };
+    }
+}
+```
+
+This interface allows each trainable layer to select its activation independently. Sigmoid and tanh derivatives use the already-computed output, avoiding unnecessary recomputation.
+
+## 3. Loss functions
+
+Create `LossFunction.java`.
+
+java
+```
+
+public interface LossFunction {
+    double loss(double[] predictions, double[] targets);
+
+    // Gradient of loss with respect to predictions.
+    double[] gradient(double[] predictions, double[] targets);
+
+    static LossFunction meanSquaredError() {
+        return new LossFunction() {
+            public double loss(double[] p, double[] t) {
+                checkShapes(p, t);
+                double sum = 0.0;
+
+                for (int i = 0; i < p.length; i++) {
+                    double d = p[i] - t[i];
+                    sum += d * d;
+                }
+
+                return sum / p.length;
+            }
+
+            public double[] gradient(double[] p, double[] t) {
+                checkShapes(p, t);
+                double[] g = new double[p.length];
+
+                for (int i = 0; i < p.length; i++) {
+                    g[i] = 2.0 * (p[i] - t[i]) / p.length;
+                }
+
+                return g;
+            }
+        };
+    }
+
+    static LossFunction binaryCrossEntropy() {
+        return new LossFunction() {
+            public double loss(double[] p, double[] t) {
+                checkShapes(p, t);
+                double sum = 0.0;
+                double eps = 1e-12;
+
+                for (int i = 0; i < p.length; i++) {
+                    if (t[i] < 0.0 || t[i] > 1.0) {
+                        throw new IllegalArgumentException(
+                            "Binary targets must be in [0, 1]");
+                    }
+
+                    double q = Math.max(eps, Math.min(1.0 - eps, p[i]));
+                    sum -= t[i] * Math.log(q)
+                         + (1.0 - t[i]) * Math.log(1.0 - q);
+                }
+
+                return sum / p.length;
+            }
+
+            public double[] gradient(double[] p, double[] t) {
+                checkShapes(p, t);
+                double[] g = new double[p.length];
+                double eps = 1e-12;
+
+                for (int i = 0; i < p.length; i++) {
+                    double q = Math.max(eps, Math.min(1.0 - eps, p[i]));
+                    g[i] = (-t[i] / q + (1.0 - t[i]) / (1.0 - q))
+                           / p.length;
+                }
+
+                return g;
+            }
+        };
+    }
+
+    private static void checkShapes(double[] p, double[] t) {
+        if (p == null || t == null || p.length == 0
+                || p.length != t.length) {
+            throw new IllegalArgumentException(
+                "Predictions and targets must have equal nonzero lengths");
+        }
+    }
+}
+```
+
+The loss gradient is defined with respect to the predictions. The network will combine it with the output activation derivative. This makes the same backpropagation engine usable with multiple loss functions.
+
+## 4. Optimizer interface, SGD, and Adam
+
+The optimizer should be independent of the network architecture. This lets us switch optimization algorithms without rewriting backpropagation.
+
+Create `Optimizer.java`:
+
+java
+```
+
+public interface Optimizer {
+    void update(double[] parameters, double[] gradients);
+}
+```
+
+Create `SGD.java`:
+
+java
+```
+
+import java.util.Arrays;
+
+public class SGD implements Optimizer {
+    private final double learningRate;
+    private final double momentum;
+    private double[] velocity;
+
+    public SGD(double learningRate) {
+        this(learningRate, 0.0);
+    }
+
+    public SGD(double learningRate, double momentum) {
+        if (!(learningRate > 0.0) ||
+            momentum < 0.0 || momentum >= 1.0) {
+            throw new IllegalArgumentException("Invalid SGD parameters");
+        }
+
+        this.learningRate = learningRate;
+        this.momentum = momentum;
+    }
+
+    @Override
+    public void update(double[] parameters, double[] gradients) {
+        if (parameters.length != gradients.length) {
+            throw new IllegalArgumentException("Parameter/gradient mismatch");
+        }
+
+        if (velocity == null || velocity.length != parameters.length) {
+            velocity = new double[parameters.length];
+        }
+
+        for (int i = 0; i < parameters.length; i++) {
+            velocity[i] = momentum * velocity[i] + gradients[i];
+            parameters[i] -= learningRate * velocity[i];
+        }
+    }
+}
+```
+
+Create `Adam.java`:
+
+java
+```
+
+public class Adam implements Optimizer {
+    private final double learningRate;
+    private final double beta1;
+    private final double beta2;
+    private final double epsilon;
+
+    private double[] firstMoment;
+    private double[] secondMoment;
+    private long timestep;
+
+    public Adam(double learningRate) {
+        this(learningRate, 0.9, 0.999, 1e-8);
+    }
+
+    public Adam(double learningRate, double beta1,
+                double beta2, double epsilon) {
+        if (!(learningRate > 0.0) ||
+            beta1 < 0.0 || beta1 >= 1.0 ||
+            beta2 < 0.0 || beta2 >= 1.0 ||
+            !(epsilon > 0.0)) {
+            throw new IllegalArgumentException("Invalid Adam parameters");
+        }
+
+        this.learningRate = learningRate;
+        this.beta1 = beta1;
+        this.beta2 = beta2;
+        this.epsilon = epsilon;
+    }
+
+    @Override
+    public void update(double[] parameters, double[] gradients) {
+        if (parameters.length != gradients.length) {
+            throw new IllegalArgumentException("Parameter/gradient mismatch");
+        }
+
+        if (firstMoment == null ||
+            firstMoment.length != parameters.length) {
+            firstMoment = new double[parameters.length];
+            secondMoment = new double[parameters.length];
+            timestep = 0;
+        }
+
+        timestep++;
+        double correction1 = 1.0 - Math.pow(beta1, timestep);
+        double correction2 = 1.0 - Math.pow(beta2, timestep);
+
+        for (int i = 0; i < parameters.length; i++) {
+            double g = gradients[i];
+
+            firstMoment[i] = beta1 * firstMoment[i]
+                           + (1.0 - beta1) * g;
+
+            secondMoment[i] = beta2 * secondMoment[i]
+                            + (1.0 - beta2) * g * g;
+
+            double mHat = firstMoment[i] / correction1;
+            double vHat = secondMoment[i] / correction2;
+
+            parameters[i] -= learningRate * mHat
+                           / (Math.sqrt(vHat) + epsilon);
+        }
+    }
+}
+```
+
+Both optimizers expect the gradient of the loss, meaning parameters are updated by subtraction. That convention will be used throughout the expanded framework.
+
+## 5. Training engine requirements
+
+The training engine will sit above the network and handle the training lifecycle.
+
+Create `Trainer.java`:
+
+java
+```
+
+import java.util.Random;
+
+public class Trainer {
+    private final int epochs;
+    private final int batchSize;
+    private final boolean shuffle;
+    private final Random random;
+
+    public Trainer(int epochs, int batchSize, boolean shuffle,
+                   long seed) {
+        if (epochs <= 0 || batchSize <= 0) {
+            throw new IllegalArgumentException(
+                "Epochs and batch size must be positive");
+        }
+
+        this.epochs = epochs;
+        this.batchSize = batchSize;
+        this.shuffle = shuffle;
+        this.random = new Random(seed);
+    }
+
+    public int getEpochs() {
+        return epochs;
+    }
+
+    public int getBatchSize() {
+        return batchSize;
+    }
+
+    public boolean shouldShuffle() {
+        return shuffle;
+    }
+
+    public Random getRandom() {
+        return random;
+    }
+}
+```
+
+This class defines training configuration. The network's `fit()` implementation will consume it, shuffle the dataset deterministically when a seed is supplied, accumulate mini-batch gradients, and report training and validation loss.
+
+## 6. Expanded neural network
+
+The central network class is where the components come together. The following is the intended structure for the replacement `NeuralNetwork.java`. It retains your original `Layer[]` and `Neuron[]` representation while supporting per-layer activations, mini-batch gradient accumulation, configurable loss, and pluggable optimizers.
+
+java
+```
+
+import java.util.Arrays;
+import java.util.Random;
+
+public class NeuralNetwork {
+    private final Layer[] layers;
+    private final ActivationFunction[] activations;
+    private final LossFunction lossFunction;
+    private final Optimizer optimizer;
+
+    public NeuralNetwork(int[] topology, double learningRate) {
+        this(topology, repeatedSigmoid(topology),
+             LossFunction.meanSquaredError(),
+             new SGD(learningRate), 42L);
+    }
+
+    public NeuralNetwork(
+            int[] topology,
+            ActivationFunction[] activations,
+            LossFunction lossFunction,
+            Optimizer optimizer,
+            long seed) {
+
+        if (topology == null || topology.length < 2) {
+            throw new IllegalArgumentException(
+                "Topology must contain input and output layers");
+        }
+
+        for (int size : topology) {
+            if (size <= 0) {
+                throw new IllegalArgumentException(
+                    "Layer sizes must be positive");
+            }
+        }
+
+        if (activations == null ||
+            activations.length != topology.length ||
+            lossFunction == null || optimizer == null) {
+            throw new IllegalArgumentException(
+                "Invalid network configuration");
+        }
+
+        this.activations = activations.clone();
+        this.lossFunction = lossFunction;
+        this.optimizer = optimizer;
+        this.layers = new Layer[topology.length];
+
+        Random rand = new Random(seed);
+        layers[0] = new Layer(topology[0], 0, rand);
+
+        // Xavier-style initialization for sigmoid/tanh-friendly networks.
+        for (int l = 1; l < topology.length; l++) {
+            int fanIn = topology[l - 1];
+            int fanOut = topology[l];
+            layers[l] = new Layer(topology[l], fanIn, rand);
+
+            double limit = Math.sqrt(6.0 / (fanIn + fanOut));
+
+            for (Neuron neuron : layers[l].neurons) {
+                for (int j = 0; j < neuron.weights.length; j++) {
+                    neuron.weights[j] =
+                        (rand.nextDouble() * 2.0 - 1.0) * limit;
+                }
+
+                neuron.bias = 0.0;
+            }
+        }
+    }
+
+    private static ActivationFunction[] repeatedSigmoid(
+            int[] topology) {
+        if (topology == null || topology.length < 2) {
+            throw new IllegalArgumentException("Invalid topology");
+        }
+
+        ActivationFunction[] result =
+            new ActivationFunction[topology.length];
+
+        result[0] = ActivationFunction.linear();
+
+        for (int i = 1; i < result.length; i++) {
+            result[i] = ActivationFunction.sigmoid();
+        }
+
+        return result;
+    }
+
+    public double[] forwardPropagate(double[] inputs) {
+        if (inputs == null ||
+            inputs.length != layers[0].neurons.length) {
+            throw new IllegalArgumentException(
+                "Input dimension does not match network");
+        }
+
+        for (int i = 0; i < inputs.length; i++) {
+            if (!Double.isFinite(inputs[i])) {
+                throw new IllegalArgumentException(
+                    "Inputs must be finite");
+            }
+
+            layers[0].neurons[i].value = inputs[i];
+        }
+
+        for (int l = 1; l < layers.length; l++) {
+            Layer previous = layers[l - 1];
+            Layer current = layers[l];
+
+            for (Neuron neuron : current.neurons) {
+                double sum = neuron.bias;
+
+                for (int j = 0; j < previous.neurons.length; j++) {
+                    sum += previous.neurons[j].value
+                         * neuron.weights[j];
+                }
+
+                neuron.value = activations[l].activate(sum);
+            }
+        }
+
+        Layer output = layers[layers.length - 1];
+        double[] result = new double[output.neurons.length];
+
+        for (int i = 0; i < result.length; i++) {
+            result[i] = output.neurons[i].value;
+        }
+
+        return result;
+    }
+
+    public double[] predict(double[] inputs) {
+        return forwardPropagate(inputs);
+    }
+
+    public double calculateLoss(double[][] inputs,
+                                double[][] targets) {
+        validateDataset(inputs, targets);
+        double total = 0.0;
+
+        for (int i = 0; i < inputs.length; i++) {
+            total += lossFunction.loss(
+                forwardPropagate(inputs[i]), targets[i]);
+        }
+
+        return total / inputs.length;
+    }
+
+    // Trains on one mini-batch. Gradients are accumulated before
+    // the optimizer updates any parameters.
+    public void trainBatch(double[][] inputs, double[][] targets) {
+        validateDataset(inputs, targets);
+
+        int parameterCount = parameterCount();
+        double[] parameters = flattenParameters();
+        double[] gradients = new double[parameterCount];
+
+        for (int sample = 0; sample < inputs.length; sample++) {
+            double[] prediction = forwardPropagate(inputs[sample]);
+
+            if (targets[sample].length != prediction.length) {
+                throw new IllegalArgumentException(
+                    "Target dimension does not match output");
+            }
+
+            double[] outputGradient =
+                lossFunction.gradient(prediction, targets[sample]);
+
+            Layer outputLayer = layers[layers.length - 1];
+
+            for (int i = 0; i < outputLayer.neurons.length; i++) {
+                Neuron neuron = outputLayer.neurons[i];
+                neuron.gradient = outputGradient[i]
+                    * activations[layers.length - 1]
+                        .derivativeFromOutput(neuron.value);
+            }
+
+            // Calculate hidden-layer gradients backwards.
+            for (int l = layers.length - 2; l > 0; l--) {
+                Layer current = layers[l];
+                Layer next = layers[l + 1];
+
+                for (int i = 0; i < current.neurons.length; i++) {
+                    double sum = 0.0;
+
+                    for (Neuron nextNeuron : next.neurons) {
+                        sum += nextNeuron.gradient
+                             * nextNeuron.weights[i];
+                    }
+
+                    Neuron neuron = current.neurons[i];
+                    neuron.gradient = sum
+                        * activations[l].derivativeFromOutput(
+                            neuron.value);
+                }
+            }
+
+            // Accumulate parameter gradients in exactly the same
+            // order used by flattenParameters().
+            int k = 0;
+
+            for (int l = 1; l < layers.length; l++) {
+                Layer previous = layers[l - 1];
+
+                for (Neuron neuron : layers[l].neurons) {
+                    for (int j = 0; j < neuron.weights.length; j++) {
+                        gradients[k++] += neuron.gradient
+                            * previous.neurons[j].value;
+                    }
+
+                    gradients[k++] += neuron.gradient; // bias
+                }
+            }
+        }
+
+        for (int i = 0; i < gradients.length; i++) {
+            gradients[i] /= inputs.length;
+        }
+
+        optimizer.update(parameters, gradients);
+        unflattenParameters(parameters);
+    }
+
+    public void fit(Trainer trainer,
+                    double[][] inputs,
+                    double[][] targets) {
+        validateDataset(inputs, targets);
+
+        int[] order = new int[inputs.length];
+
+        for (int epoch = 0; epoch < trainer.getEpochs(); epoch++) {
+            for (int i = 0; i < order.length; i++) {
+                order[i] = i;
+            }
+
+            if (trainer.shouldShuffle()) {
+                Random random = trainer.getRandom();
+
+                for (int i = order.length - 1; i > 0; i--) {
+                    int j = random.nextInt(i + 1);
+                    int temp = order[i];
+                    order[i] = order[j];
+                    order[j] = temp;
+                }
+            }
+
+            int batchSize = trainer.getBatchSize();
+
+            for (int start = 0; start < order.length;
+                 start += batchSize) {
+                int end = Math.min(start + batchSize, order.length);
+                int count = end - start;
+
+                double[][] batchInputs = new double[count][];
+                double[][] batchTargets = new double[count][];
+
+                for (int i = 0; i < count; i++) {
+                    batchInputs[i] = inputs[order[start + i]];
+                    batchTargets[i] = targets[order[start + i]];
+                }
+
+                trainBatch(batchInputs, batchTargets);
+            }
+        }
+    }
+
+    private int parameterCount() {
+        int count = 0;
+
+        for (int l = 1; l < layers.length; l++) {
+            for (Neuron neuron : layers[l].neurons) {
+                count += neuron.weights.length + 1;
+            }
+        }
+
+        return count;
+    }
+
+    private double[] flattenParameters() {
+        double[] result = new double[parameterCount()];
+        int k = 0;
+
+        for (int l = 1; l < layers.length; l++) {
+            for (Neuron neuron : layers[l].neurons) {
+                for (double weight : neuron.weights) {
+                    result[k++] = weight;
+                }
+
+                result[k++] = neuron.bias;
+            }
+        }
+
+        return result;
+    }
+
+    private void unflattenParameters(double[] parameters) {
+        int k = 0;
+
+        for (int l = 1; l < layers.length; l++) {
+            for (Neuron neuron : layers[l].neurons) {
+                for (int j = 0; j < neuron.weights.length; j++) {
+                    neuron.weights[j] = parameters[k++];
+                }
+
+                neuron.bias = parameters[k++];
+            }
+        }
+    }
+
+    private void validateDataset(double[][] inputs,
+                                 double[][] targets) {
+        if (inputs == null || targets == null ||
+            inputs.length == 0 || inputs.length != targets.length) {
+            throw new IllegalArgumentException(
+                "Dataset must have matching, nonempty inputs and targets");
+        }
+
+        for (int i = 0; i < inputs.length; i++) {
+            if (inputs[i] == null ||
+                inputs[i].length != layers[0].neurons.length ||
+                targets[i] == null ||
+                targets[i].length != layers[layers.length - 1]
+                                               .neurons.length) {
+                throw new IllegalArgumentException(
+                    "Invalid input or target dimensions at row " + i);
+            }
+        }
+    }
+}
+```
+
+Important implementation notes:
+
+- This is a foundational implementation, not yet the complete production framework.
+- `backpropagate()` from your original class has been replaced by `trainBatch()`, which computes gradients for the whole batch before updating parameters.
+- `fit()` provides shuffled mini-batch training.
+- The optimizer maintains state across batches, which is necessary for Adam and momentum-based SGD.
+- The network uses Xavier-style initialization; He initialization should be added for ReLU-heavy architectures.
+- The current gradient calculation is suitable for sigmoid, tanh, ReLU, leaky ReLU, and linear activations when their derivatives are implemented correctly.
+- For binary cross-entropy, sigmoid output gradients can be simplified to improve numerical stability. A fused sigmoid-plus-cross-entropy implementation is a worthwhile next improvement.
+
+## 7. Update `Main.java` and train XOR
+
+Your original XOR example can now use the reusable training API.
+
+java
+```
+
+public class Main {
+    public static void main(String[] args) {
+        double[][] inputs = {
+            {0, 0},
+            {0, 1},
+            {1, 0},
+            {1, 1}
+        };
+
+        double[][] targets = {
+            {0},
+            {1},
+            {1},
+            {0}
+        };
+
+        int[] topology = {2, 8, 1};
+
+        ActivationFunction[] activations = {
+            ActivationFunction.linear(),
+            ActivationFunction.tanh(),
+            ActivationFunction.sigmoid()
+        };
+
+        NeuralNetwork network = new NeuralNetwork(
+            topology,
+            activations,
+            LossFunction.meanSquaredError(),
+            new Adam(0.01),
+            42L
+        );
+
+        Trainer trainer = new Trainer(
+            10_000, // epochs
+            4,      // batch size
+            true,   // shuffle
+            42L     // reproducible shuffle seed
+        );
+
+        System.out.printf("Initial loss: %.6f%n",
+            network.calculateLoss(inputs, targets));
+
+        network.fit(trainer, inputs, targets);
+
+        System.out.printf("Final loss: %.6f%n",
+            network.calculateLoss(inputs, targets));
+
+        System.out.println("\nPredictions:");
+
+        for (int i = 0; i < inputs.length; i++) {
+            double prediction = network.predict(inputs[i])[0];
+
+            System.out.printf(
+                "[%.0f, %.0f] -> %.5f (target: %.0f)%n",
+                inputs[i][0],
+                inputs[i][1],
+                prediction,
+                targets[i][0]
+            );
+        }
+    }
+}
+```
+
+This uses `Adam`, `tanh` for the hidden layer, sigmoid for the output, and mini-batches of four examples. XOR is small enough for experimentation, although convergence is not guaranteed for every architecture or hyperparameter choice.
+
+## 8. What remains to complete the full framework
+
+The code above establishes the core, but several of the features from the original roadmap still need their own implementations.
+
+Core implemented
+
+Feedforward computation, configurable activations and losses, mini-batch gradients, SGD with momentum, Adam, shuffled training, and deterministic initialization.
+
+Training and evaluation
+
+Validation loops, early stopping, metric tracking, learning-rate schedulers, gradient clipping, L1/L2 regularization, and checkpoint restoration.
+
+Regularization and architecture
+
+Dropout, batch normalization, residual connections, softmax with multiclass cross-entropy, and generalized layer interfaces.
+
+Advanced model families
+
+Convolutional layers, pooling, recurrent networks (RNN/LSTM), embeddings, attention, Transformers, and autoencoders. GANs and diffusion models can be built on top of these primitives.
+
+Engineering and testing
+
+Model serialization, optimizer-state persistence, unit tests, numerical gradient checks, configuration files, logging, and performance benchmarks.
+
+## 9. Build and compatibility checks
+
+Put each public Java class in its own `.java` file in the same source directory, then compile with Java 17 or later:
+
+bash
+```
+javac *.java
+java Main
+```
+
+The code uses only standard Java APIs. Java 17 is recommended for the initial project baseline.
+
+One important design limitation remains: `Neuron` currently exposes its parameters publicly, and `NeuralNetwork` assumes dense, fully connected layers. That works for this first implementation, but convolutional and recurrent layers need a more general layer interface, and reliable serialization should include optimizer state as well as model parameters.
+
+My recommended next milestone is to complete the training engine and its tests before adding convolutional or recurrent architectures. That means implementing validation metrics, early stopping, checkpointing, numerical gradient checks, and stable softmax/cross-entropy, then verifying the framework on XOR and other small datasets. This will give us a tested foundation for the more advanced components rather than layering new architectures on top of unverified training code.
+
+
+---
+
+
+Below are three complete Java classes for integrating MNIST into your Maven-based deep learning project:
+
+- `MNISTDownloader.java` — downloads the official MNIST dataset files and decompresses them.
+- `MNISTLoader.java` — parses the IDX binary format, normalizes images to `[0, 1]`, and converts labels to one-hot vectors.
+- `MNISTRunner.java` — loads the dataset, trains your neural network, and evaluates classification accuracy.
+
+These classes use only the Java standard library. The runner assumes your `NeuralNetwork` supports the constructor, `fit()`, and `predict()` methods from our earlier implementation.
+
+## 1. `MNISTDownloader.java`
+
+Downloads the four standard MNIST files: training images, training labels, test images, and test labels. It supports both gzip-compressed downloads and already-decompressed files.
+
+The downloader uses a public mirror of the standard MNIST files. The dataset has 60,000 training examples and 10,000 test examples, with 28 × 28 images and labels from 0 to 9.
+
+GitHub
+
++1
+
+java
+```
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.Duration;
+import java.util.zip.GZIPInputStream;
+
+public final class MNISTDownloader {
+
+    private static final String BASE_URL =
+        "https://storage.googleapis.com/cvdf-datasets/mnist/";
+
+    private static final String[] FILES = {
+        "train-images-idx3-ubyte",
+        "train-labels-idx1-ubyte",
+        "t10k-images-idx3-ubyte",
+        "t10k-labels-idx1-ubyte"
+    };
+
+    private static final HttpClient CLIENT = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(30))
+        .followRedirects(HttpClient.Redirect.NORMAL)
+        .build();
+
+    private MNISTDownloader() {
+    }
+
+    public static Path download() throws IOException, InterruptedException {
+        return download(Path.of("data", "mnist"));
+    }
+
+    public static Path download(Path directory)
+            throws IOException, InterruptedException {
+
+        Files.createDirectories(directory);
+
+        for (String file : FILES) {
+            Path rawFile = directory.resolve(file);
+            Path gzipFile = directory.resolve(file + ".gz");
+
+            if (Files.exists(rawFile) && Files.size(rawFile) > 0) {
+                System.out.println("Already available: " + rawFile);
+                continue;
+            }
+
+            System.out.println("Downloading " + file + ".gz");
+
+            try {
+                downloadFile(BASE_URL + file + ".gz", gzipFile);
+                decompress(gzipFile, rawFile);
+            } finally {
+                Files.deleteIfExists(gzipFile);
+            }
+
+            System.out.println("Saved " + rawFile);
+        }
+
+        System.out.println("MNIST files are ready in: "
+            + directory.toAbsolutePath());
+
+        return directory;
+    }
+
+    private static void downloadFile(String url, Path destination)
+            throws IOException, InterruptedException {
+
+        Path temporary = Files.createTempFile(
+            destination.getParent(), "mnist-", ".download");
+
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofMinutes(3))
+                .GET()
+                .build();
+
+            HttpResponse<InputStream> response = CLIENT.send(
+                request, HttpResponse.BodyHandlers.ofInputStream());
+
+            try (InputStream input = response.body()) {
+                if (response.statusCode() != 200) {
+                    throw new IOException(
+                        "Download failed with HTTP status "
+                            + response.statusCode() + ": " + url);
+                }
+
+                try (OutputStream output = Files.newOutputStream(temporary)) {
+                    input.transferTo(output);
+                }
+            }
+
+            if (Files.size(temporary) == 0) {
+                throw new IOException("Downloaded file is empty: " + url);
+            }
+
+            Files.move(temporary, destination,
+                StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    private static void decompress(Path gzipFile, Path outputFile)
+            throws IOException {
+
+        Path temporary = Files.createTempFile(
+            outputFile.getParent(), "mnist-", ".raw");
+
+        try {
+            try (InputStream input = new GZIPInputStream(
+                     Files.newInputStream(gzipFile));
+                 OutputStream output = Files.newOutputStream(temporary)) {
+                input.transferTo(output);
+            }
+
+            if (Files.size(temporary) == 0) {
+                throw new IOException("Decompressed file is empty");
+            }
+
+            Files.move(temporary, outputFile,
+                StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    public static void main(String[] args) throws Exception {
+        Path directory = args.length > 0
+            ? Path.of(args[0])
+            : Path.of("data", "mnist");
+
+        download(directory);
+    }
+}
+```
+
+## 2. `MNISTLoader.java`
+
+This loader reads the uncompressed IDX files produced by `MNISTDownloader`. It validates the file headers, image dimensions, label ranges, and image/label counts.
+
+It provides both one-hot targets for training and integer labels for evaluation.
+
+java
+```
+
+import java.io.BufferedInputStream;
+import java.io.DataInputStream;
+import java.io.EOFException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+public final class MNISTLoader {
+
+    public static final int IMAGE_ROWS = 28;
+    public static final int IMAGE_COLS = 28;
+    public static final int INPUT_SIZE = IMAGE_ROWS * IMAGE_COLS;
+    public static final int NUM_CLASSES = 10;
+
+    private static final int IMAGE_MAGIC = 2051;
+    private static final int LABEL_MAGIC = 2049;
+
+    private MNISTLoader() {
+    }
+
+    public static final class Dataset {
+        private final double[][] images;
+        private final int[] labels;
+
+        private Dataset(double[][] images, int[] labels) {
+            this.images = images;
+            this.labels = labels;
+        }
+
+        public int size() {
+            return images.length;
+        }
+
+        public double[][] getImages() {
+            return images;
+        }
+
+        public double[] getImage(int index) {
+            return images[index];
+        }
+
+        public int[] getLabels() {
+            return labels;
+        }
+
+        public int getLabel(int index) {
+            return labels[index];
+        }
+
+        public double[][] getOneHotTargets() {
+            double[][] targets = new double[labels.length][NUM_CLASSES];
+
+            for (int i = 0; i < labels.length; i++) {
+                targets[i][labels[i]] = 1.0;
+            }
+
+            return targets;
+        }
+
+        public double[] getOneHotTarget(int index) {
+            double[] target = new double[NUM_CLASSES];
+            target[labels[index]] = 1.0;
+            return target;
+        }
+    }
+
+    public static Dataset loadTraining(Path directory)
+            throws IOException {
+        return load(
+            directory.resolve("train-images-idx3-ubyte"),
+            directory.resolve("train-labels-idx1-ubyte"));
+    }
+
+    public static Dataset loadTest(Path directory)
+            throws IOException {
+        return load(
+            directory.resolve("t10k-images-idx3-ubyte"),
+            directory.resolve("t10k-labels-idx1-ubyte"));
+    }
+
+    public static Dataset load(Path imageFile, Path labelFile)
+            throws IOException {
+
+        double[][] images = loadImages(imageFile);
+        int[] labels = loadLabels(labelFile);
+
+        if (images.length != labels.length) {
+            throw new IOException(
+                "Image count (" + images.length
+                    + ") does not match label count (" + labels.length + ")");
+        }
+
+        return new Dataset(images, labels);
+    }
+
+    public static double[][] loadImages(Path path) throws IOException {
+        try (DataInputStream in = input(path)) {
+            int magic = in.readInt();
+            int count = in.readInt();
+            int rows = in.readInt();
+            int cols = in.readInt();
+
+            if (magic != IMAGE_MAGIC) {
+                throw new IOException(
+                    "Invalid image IDX magic number in " + path);
+            }
+
+            if (count <= 0 || rows != IMAGE_ROWS || cols != IMAGE_COLS) {
+                throw new IOException(
+                    "Unexpected MNIST image dimensions in " + path);
+            }
+
+            long expectedLength = 16L + (long) count * rows * cols;
+            if (Files.size(path) != expectedLength) {
+                throw new IOException(
+                    "Unexpected image file size in " + path);
+            }
+
+            double[][] images = new double[count][INPUT_SIZE];
+
+            for (int i = 0; i < count; i++) {
+                for (int p = 0; p < INPUT_SIZE; p++) {
+                    images[i][p] = in.readUnsignedByte() / 255.0;
+                }
+            }
+
+            ensureEndOfFile(in, path);
+            return images;
+        } catch (EOFException e) {
+            throw new IOException("Truncated image file: " + path, e);
+        }
+    }
+
+    public static int[] loadLabels(Path path) throws IOException {
+        try (DataInputStream in = input(path)) {
+            int magic = in.readInt();
+            int count = in.readInt();
+
+            if (magic != LABEL_MAGIC || count <= 0) {
+                throw new IOException(
+                    "Invalid label IDX header in " + path);
+            }
+
+            long expectedLength = 8L + count;
+            if (Files.size(path) != expectedLength) {
+                throw new IOException(
+                    "Unexpected label file size in " + path);
+            }
+
+            int[] labels = new int[count];
+
+            for (int i = 0; i < count; i++) {
+                int label = in.readUnsignedByte();
+
+                if (label >= NUM_CLASSES) {
+                    throw new IOException(
+                        "Invalid label " + label + " at index " + i);
+                }
+
+                labels[i] = label;
+            }
+
+            ensureEndOfFile(in, path);
+            return labels;
+        } catch (EOFException e) {
+            throw new IOException("Truncated label file: " + path, e);
+        }
+    }
+
+    private static DataInputStream input(Path path) throws IOException {
+        InputStream stream = Files.newInputStream(path);
+        return new DataInputStream(new BufferedInputStream(stream));
+    }
+
+    private static void ensureEndOfFile(DataInputStream in, Path path)
+            throws IOException {
+        if (in.read() != -1) {
+            throw new IOException("Unexpected trailing bytes in " + path);
+        }
+    }
+}
+```
+
+The loader returns normalized pixel values and integer labels. It does not allocate one-hot targets until you request them, which helps control memory use.
+
+## 3. `MNISTRunner.java`
+
+This runner creates a network with 784 inputs, two hidden layers, and 10 outputs. It trains with Adam, prints the loss, and evaluates test accuracy and a confusion matrix.
+
+Because the earlier `NeuralNetwork` implementation does not yet include softmax or categorical cross-entropy, this version uses sigmoid outputs with mean squared error. It predicts the class with the largest output. This is a useful baseline, but adding softmax and categorical cross-entropy is recommended for a stronger multiclass classifier.
+
+java
+```
+
+import java.nio.file.Path;
+import java.util.Arrays;
+
+public class MNISTRunner {
+
+    private static final int INPUTS = 784;
+    private static final int CLASSES = 10;
+
+    private static final int EPOCHS = 5;
+    private static final int BATCH_SIZE = 256;
+
+    private static final long SEED = 42L;
+
+    public static void main(String[] args) throws Exception {
+        boolean quickMode = Arrays.asList(args).contains("--quick");
+
+        Path dataDirectory = Path.of("data", "mnist");
+
+        // 1. Download the dataset if necessary.
+        MNISTDownloader.download(dataDirectory);
+
+        // 2. Load training and test data.
+        System.out.println("\nLoading MNIST dataset...");
+
+        MNISTLoader.Dataset training =
+            MNISTLoader.loadTraining(dataDirectory);
+
+        MNISTLoader.Dataset testing =
+            MNISTLoader.loadTest(dataDirectory);
+
+        System.out.println("Training examples: " + training.size());
+        System.out.println("Test examples: " + testing.size());
+
+        // Quick mode uses a subset for an initial smoke test.
+        int trainingCount = quickMode
+            ? Math.min(10_000, training.size())
+            : training.size();
+
+        double[][] trainImages = Arrays.copyOf(
+            training.getImages(), trainingCount);
+
+        int[] trainLabels = Arrays.copyOf(
+            training.getLabels(), trainingCount);
+
+        double[][] trainTargets = oneHotEncode(trainLabels);
+
+        double[][] testImages = testing.getImages();
+        int[] testLabels = testing.getLabels();
+
+        System.out.println("Examples used for training: " + trainingCount);
+
+        // 3. Create the neural network.
+        int[] topology = {INPUTS, 128, 64, CLASSES};
+
+        ActivationFunction[] activations = {
+            ActivationFunction.linear(),
+            ActivationFunction.relu(),
+            ActivationFunction.relu(),
+            ActivationFunction.sigmoid()
+        };
+
+        NeuralNetwork network = new NeuralNetwork(
+            topology,
+            activations,
+            LossFunction.meanSquaredError(),
+            new Adam(0.001),
+            SEED
+        );
+
+        System.out.printf(
+            "\nInitial training loss: %.6f%n",
+            network.calculateLoss(trainImages, trainTargets)
+        );
+
+        // 4. Train one epoch at a time so progress is visible.
+        System.out.println("\nStarting training...");
+
+        for (int epoch = 1; epoch <= EPOCHS; epoch++) {
+            Trainer trainer = new Trainer(
+                1,
+                BATCH_SIZE,
+                true,
+                SEED + epoch
+            );
+
+            long start = System.currentTimeMillis();
+
+            network.fit(trainer, trainImages, trainTargets);
+
+            double loss = network.calculateLoss(
+                trainImages, trainTargets);
+
+            double accuracy = evaluateAccuracy(
+                network, testImages, testLabels);
+
+            long elapsed = System.currentTimeMillis() - start;
+
+            System.out.printf(
+                "Epoch %d/%d | loss: %.6f | test accuracy: %.2f%%"
+                    + " | time: %.1f s%n",
+                epoch,
+                EPOCHS,
+                loss,
+                accuracy * 100.0,
+                elapsed / 1000.0
+            );
+        }
+
+        // 5. Final evaluation.
+        System.out.println("\nFinal evaluation:");
+        evaluate(network, testImages, testLabels);
+
+        // 6. Display sample predictions.
+        System.out.println("\nSample predictions:");
+
+        int samples = Math.min(20, testImages.length);
+
+        for (int i = 0; i < samples; i++) {
+            double[] output = network.predict(testImages[i]);
+            int predicted = argmax(output);
+
+            System.out.printf(
+                "Sample %d | predicted: %d | actual: %d%n",
+                i,
+                predicted,
+                testLabels[i]
+            );
+        }
+    }
+
+    private static double[][] oneHotEncode(int[] labels) {
+        double[][] targets = new double[labels.length][CLASSES];
+
+        for (int i = 0; i < labels.length; i++) {
+            int label = labels[i];
+
+            if (label < 0 || label >= CLASSES) {
+                throw new IllegalArgumentException(
+                    "Invalid digit label: " + label);
+            }
+
+            targets[i][label] = 1.0;
+        }
+
+        return targets;
+    }
+
+    private static double evaluateAccuracy(
+            NeuralNetwork network,
+            double[][] images,
+            int[] labels) {
+
+        if (images.length != labels.length || images.length == 0) {
+            throw new IllegalArgumentException(
+                "Invalid evaluation dataset");
+        }
+
+        int correct = 0;
+
+        for (int i = 0; i < images.length; i++) {
+            int predicted = argmax(network.predict(images[i]));
+
+            if (predicted == labels[i]) {
+                correct++;
+            }
+        }
+
+        return (double) correct / images.length;
+    }
+
+    private static void evaluate(
+            NeuralNetwork network,
+            double[][] images,
+            int[] labels) {
+
+        int[][] confusion = new int[CLASSES][CLASSES];
+        int correct = 0;
+
+        for (int i = 0; i < images.length; i++) {
+            int predicted = argmax(network.predict(images[i]));
+            int actual = labels[i];
+
+            confusion[actual][predicted]++;
+
+            if (predicted == actual) {
+                correct++;
+            }
+        }
+
+        System.out.printf(
+            "Test accuracy: %.2f%% (%d/%d)%n",
+            100.0 * correct / images.length,
+            correct,
+            images.length
+        );
+
+        System.out.println("\nConfusion matrix:");
+        System.out.println("Rows = actual digits; columns = predictions");
+
+        System.out.print("     ");
+
+        for (int digit = 0; digit < CLASSES; digit++) {
+            System.out.printf("%6d", digit);
+        }
+
+        System.out.println();
+
+        for (int actual = 0; actual < CLASSES; actual++) {
+            System.out.printf("%3d: ", actual);
+
+            for (int predicted = 0; predicted < CLASSES; predicted++) {
+                System.out.printf("%6d", confusion[actual][predicted]);
+            }
+
+            System.out.println();
+        }
+    }
+
+    private static int argmax(double[] values) {
+        if (values == null || values.length == 0) {
+            throw new IllegalArgumentException(
+                "Output must not be empty");
+        }
+
+        int best = 0;
+
+        for (int i = 1; i < values.length; i++) {
+            if (values[i] > values[best]) {
+                best = i;
+            }
+        }
+
+        return best;
+    }
+}
+```
+
+## 4. Project structure
+
+Place the classes in your Maven project as follows:
+
+text
+```
+java-deep-learning/
+├── pom.xml
+├── data/
+│   └── mnist/                   # Downloaded automatically
+├── src/
+│   ├── main/
+│   │   └── java/
+│   │       ├── Neuron.java
+│   │       ├── Layer.java
+│   │       ├── NeuralNetwork.java
+│   │       ├── ActivationFunction.java
+│   │       ├── LossFunction.java
+│   │       ├── Optimizer.java
+│   │       ├── SGD.java
+│   │       ├── Adam.java
+│   │       ├── Trainer.java
+│   │       ├── MNISTDownloader.java
+│   │       ├── MNISTLoader.java
+│   │       └── MNISTRunner.java
+│   └── test/
+│       └── java/
+└── target/
+```
+
+All classes in this example use the default package, consistent with your original code.
+
+## 5. Run it with Maven Exec Plugin
+
+First, download the data independently if you want to verify that the downloader works:
+
+bash
+```
+mvn compile exec:java \
+  -Dexec.mainClass=MNISTDownloader
+```
+
+Then run a quick training test with 10,000 training images:
+
+bash
+```
+mvn compile exec:java \
+  -Dexec.mainClass=MNISTRunner \
+  -Dexec.args="--quick"
+```
+
+For all 60,000 training images, omit `--quick`:
+
+bash
+```
+mvn compile exec:java \
+  -Dexec.mainClass=MNISTRunner
+```
+
+For the full dataset, I recommend giving the JVM more memory. Add this to your shell before running Maven if needed:
+
+bash
+```
+export MAVEN_OPTS="-Xmx2g"
+```
+
+On Windows PowerShell:
+
+powershell
+```
+$env:MAVEN_OPTS="-Xmx2g"
+```
+
+The full dataset uses substantial memory because the current network API stores pixels as Java `double` arrays.
+
+## 6. Important compatibility checks
+
+Before running, verify the following:
+
+- `NeuralNetwork` has the five-argument constructor used above.
+- `NeuralNetwork.fit(Trainer, double[][], double[][])` is implemented.
+- `NeuralNetwork.predict(double[])` returns exactly 10 output values.
+- `Adam`, `Trainer`, `ActivationFunction`, and `LossFunction` match the earlier implementations.
+- `Main.java` is not accidentally being used instead of `MNISTRunner` when invoking Maven.
+
+The runner evaluates the entire official test set after every epoch, which adds computation time. For faster experimentation, you can initially evaluate less frequently.
+
+Next recommended improvement: implement a vector-level `Softmax` output layer and numerically stable categorical cross-entropy. That is the main missing neural-network feature for making this a proper multiclass MNIST classifier.
+
+
+No, you don't need to remove `Main.java`. You can keep it for your XOR example and use `MNISTRunner.java` as the entry point for MNIST training.
+
+Since your Maven Exec Plugin already supports overriding the main class, you can run either program.
+
+### Run MNIST
+
+bash
+```
+mvn compile exec:java -Dexec.mainClass=MNISTRunner
+```
+
+Run a smaller training test:
+
+bash
+```
+mvn compile exec:java -Dexec.mainClass=MNISTRunner -Dexec.args="--quick"
+```
+
+### Run your original XOR example
+
+bash
+```
+mvn compile exec:java -Dexec.mainClass=Main
+```
+
+### Recommended project structure
+
+text
+```
+src/main/java/
+├── Main.java                 # XOR demonstration
+├── MNISTRunner.java          # MNIST training and evaluation
+├── MNISTDownloader.java
+├── MNISTLoader.java
+├── NeuralNetwork.java
+├── Neuron.java
+├── Layer.java
+├── ActivationFunction.java
+├── LossFunction.java
+├── Optimizer.java
+├── SGD.java
+├── Adam.java
+└── Trainer.java
+```
+
+My recommendation: Keep both classes. `Main.java` is useful for quickly testing changes to backpropagation on XOR, while `MNISTRunner.java` tests the framework on a real dataset.
+
+You only need to remove `Main.java` if you no longer want the XOR example.
+
+`-Dexec.args="--quick"` passes the command-line argument `--quick` to your Java program when you run it through Maven's Exec Plugin.
+
+In your `MNISTRunner.java`, we added this code:
+
+java
+```
+boolean quickMode = Arrays.asList(args).contains("--quick");
+```
+
+This checks whether the program received the `--quick` argument.
+
+Later, the runner uses it to choose how many training images to load into the training subset:
+
+java
+```
+int trainingCount = quickMode
+    ? Math.min(10_000, training.size())
+    : training.size();
+```
+
+## What's the difference?
+
+| Command | Training images | Purpose |
+| --- | --- | --- |
+| `mvn compile exec:java -Dexec.mainClass=MNISTRunner -Dexec.args="--quick"` | 10,000 | Quick testing and debugging |
+| `mvn compile exec:java -Dexec.mainClass=MNISTRunner` | 60,000 | Full training run |
+
+Both modes use the same network architecture and five epochs in the current code.
+
+Why use quick mode?
+
+- Verify that the MNIST downloader works.
+- Check that the loader parses the images and labels correctly.
+- Catch neural network errors early.
+- Get initial results without waiting for a full training run.
+
+Note that `--quick` does not make each training operation faster; it reduces the amount of training data. The runner still evaluates all 10,000 test images after each epoch.
+
+You can also add other arguments later, such as `--epochs 20` or `--batch-size 128`, to make the training configuration more flexible. Those options won't work until you explicitly implement their parsing in `MNISTRunner.java`.
+

@@ -1,0 +1,14 @@
+Already available: data\fashion-mnist\train-images-idx3-ubyte
+Already available: data\fashion-mnist\train-labels-idx1-ubyte
+Already available: data\fashion-mnist\t10k-images-idx3-ubyte
+Already available: data\fashion-mnist\t10k-labels-idx1-ubyte
+Fashion-MNIST files are ready in: C:\Users\dell\Desktop\nfs\data\fashion-mnist
+
+Loading Fashion-MNIST dataset...
+Training examples: 60000
+Test examples: 10000
+Examples used for training: 60000
+
+Initial training loss: 0.599391
+
+Training (Keras-like simple model)...

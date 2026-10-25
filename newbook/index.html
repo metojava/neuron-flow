@@ -1,0 +1,142 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Java Neural Networks From Scratch — Fashion MNIST Student Guide</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="index.html" class="active">Start here</a>
+      <a href="01-foundations.html">01 · Foundations</a>
+      <a href="02-forward-pass.html">02 · Forward pass</a>
+      <a href="03-backprop.html">03 · Backpropagation</a>
+      <a href="04-activations.html">04 · Activations</a>
+      <a href="05-losses-optimizers.html">05 · Losses &amp; optimizers</a>
+      <a href="06-training.html">06 · Training loop</a>
+      <a href="07-data.html">07 · Fashion MNIST data</a>
+      <a href="08-downloader-loader.html">08 · Downloader &amp; loader</a>
+      <a href="09-keras-like.html">09 · Keras-like classifier</a>
+      <a href="10-evaluation.html">10 · Evaluation &amp; confusion matrix</a>
+      <a href="11-html-report.html">11 · HTML report</a>
+      <a href="12-swing-ui.html">12 · Swing/AWT window</a>
+      <a href="13-run.html">13 · Run it</a>
+      <a href="14-full-walkthrough.html">14 · Full code</a>
+      <a href="15-practice.html">15 · Practice</a>
+      <a href="16-classical-ml.html">16 · Classical machine learning</a>
+      <a href="17-autograd.html">17 · Autograd</a>
+      <a href="18-transformers.html">18 · Transformers</a>
+      <a href="19-bert.html">19 · BERT</a>
+      <a href="20-gpt.html">20 · GPT</a>
+      <a href="21-api-reference.html">21 · API reference</a>
+      <a href="performance.html">Performance</a>
+      <a href="projects/index.html">Projects</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Java edition · Fashion MNIST</div>
+    <article>
+      <div class="eyebrow">Start here</div>
+      <h1>Understand every line of a Java neural network</h1>
+      <p class="lead">This book explains the actual code in this folder — <code>Neuron</code>, <code>Layer</code>, <code>NeuralNetwork</code>, <code>Trainer</code>, <code>ActivationFunction</code>, <code>LossFunction</code>, <code>SGD</code>, <code>Adam</code>, and the Fashion-MNIST downloader/loader/runner — with method-by-method documentation, parameter tables, the math behind each step, and complete code examples you can run. The later chapters add the two newer APIs: a scikit-learn-style <code>ml</code> package for tabular data (chapter 16) and an autograd/transformer stack for sequence models (chapters 17–20). Chapter 21 maps every package and lists what is still missing.</p>
+
+      <h2>What you will learn</h2>
+      <div class="cards">
+        <a href="01-foundations.html"><strong>01 · Foundations</strong><span>Neuron, Layer, the neural-network constructor.</span></a>
+        <a href="02-forward-pass.html"><strong>02 · Forward pass</strong><span>How an input becomes a prediction.</span></a>
+        <a href="03-backprop.html"><strong>03 · Backpropagation</strong><span>Gradients, chain rule, parameter updates.</span></a>
+        <a href="04-activations.html"><strong>04 · Activations</strong><span>Sigmoid, tanh, ReLU, Leaky ReLU, linear.</span></a>
+        <a href="05-losses-optimizers.html"><strong>05 · Losses &amp; optimizers</strong><span>MSE, BCE, SGD, Adam.</span></a>
+        <a href="06-training.html"><strong>06 · Training loop</strong><span>Epochs, mini-batches, shuffling.</span></a>
+        <a href="07-data.html"><strong>07 · Fashion MNIST data</strong><span>IDX format, normalization, one-hot.</span></a>
+        <a href="08-downloader-loader.html"><strong>08 · Downloader &amp; loader</strong><span>Download from GitHub, parse IDX.</span></a>
+        <a href="09-keras-like.html"><strong>09 · Keras-like classifier</strong><span>Flatten → Dense(128, ReLU) → Dense(10).</span></a>
+        <a href="10-evaluation.html"><strong>10 · Evaluation</strong><span>Accuracy, confusion matrix, per-class.</span></a>
+        <a href="11-html-report.html"><strong>11 · HTML report</strong><span>Save results as a web page.</span></a>
+        <a href="12-swing-ui.html"><strong>12 · Swing/AWT window</strong><span>Show images and predictions live.</span></a>
+        <a href="13-run.html"><strong>13 · Run it</strong><span>Compile and run with Maven/CLI.</span></a>
+        <a href="14-full-walkthrough.html"><strong>14 · Full code</strong><span>Complete listing of all classes.</span></a>
+        <a href="15-practice.html"><strong>15 · Practice</strong><span>Exercises to extend the project.</span></a>
+        <a href="16-classical-ml.html"><strong>16 · Classical machine learning</strong><span>DataFrame, pipelines, regression, trees, SVM, k-means.</span></a>
+        <a href="17-autograd.html"><strong>17 · Autograd</strong><span>Tensor, differentiable ops, backward pass.</span></a>
+        <a href="18-transformers.html"><strong>18 · Transformers</strong><span>Attention, encoder and decoder stacks.</span></a>
+        <a href="19-bert.html"><strong>19 · BERT</strong><span>Encoder-only models: what exists, what is missing.</span></a>
+        <a href="20-gpt.html"><strong>20 · GPT</strong><span>Decoder-only language modelling and generation.</span></a>
+        <a href="21-api-reference.html"><strong>21 · API reference</strong><span>Every package, coverage status, and documentation gaps.</span></a>
+        <a href="performance.html"><strong>Performance</strong><span>float conversion, Vector API, SIMD speedups.</span></a>
+        <a href="projects/index.html"><strong>Projects</strong><span>12 standalone tutorials: XOR to GAN.</span></a>
+      </div>
+
+      <h2>The plan</h2>
+      <div class="flow">
+        <span>Read <small>the code</small></span><b>→</b>
+        <span>Understand <small>the math</small></span><b>→</b>
+        <span>Download <small>Fashion MNIST</small></span><b>→</b>
+        <span>Train <small>the classifier</small></span><b>→</b>
+        <span>Evaluate <small>&amp; report</small></span>
+      </div>
+
+      <div class="note"><strong>Prerequisites.</strong> JDK 17, a text editor, and basic Java (arrays, loops, classes). You do not need TensorFlow or any ML library — everything is plain Java. Maven is optional but convenient for running the examples.</div>
+
+      <h2>Project layout</h2>
+      <pre><code>src/main/java/
+├── activations/           # sigmoid, tanh, ReLU family, ELU/SELU, GELU,
+│                          # Swish, Mish, PReLU, Softmax, registry
+├── autograd/              # Tensor, Ops: reverse-mode automatic differentiation
+├── data/
+│   ├── MNISTDownloader / MNISTLoader
+│   ├── FashionMNISTDownloader / FashionMNISTLoader
+│   ├── DatasetSplit, StandardScaler
+│   ├── augmentation/      # image augmentation
+│   ├── cv/                # KFold, StratifiedKFold
+│   ├── encoding/          # LabelEncoder, MissingValueImputer
+│   ├── pipeline/          # shuffle, batch, map for float[][]
+│   ├── scaling/           # MinMaxScaler, RobustScaler
+│   ├── text/              # whitespace Tokenizer
+│   ├── io/                # CSV, JSONL, Parquet
+│   └── model/             # Safetensors, GGUF, ONNX, WeightFile, quantisation
+├── evaluation/            # classification/regression metrics, AUC, HTML report
+│   ├── bootstrap/         # confidence intervals
+│   └── nlp/               # BLEU, ROUGE
+├── examples/              # FashionMNISTRunner, MNISTRunner, ClassicalMlDemo, Main
+├── hyperparam/            # GridSearch (grid and random search spaces)
+├── initialization/        # WeightInitializer (Xavier, He)
+├── layers/                # dense core + CNN, pooling, norm, dropout,
+│                          # RNN/LSTM/GRU, attention, Sequential, model I/O
+├── logging/               # TrainingLogger
+├── losses/                # MSE, BCE, cross-entropy, hinge, Huber, KL, MAE,
+│                          # Poisson, label smoothing
+├── ml/
+│   ├── DataFrame, Vector, Pipeline, DatasetSplit, Estimator/Transformer
+│   ├── preprocessing/     # imputer, one-hot encoder, standard/min-max scalers
+│   ├── model/             # linear/logistic regression, tree, forest, SVM, k-means
+│   ├── kernel/            # linear and RBF kernels
+│   └── metrics/           # accuracy, MSE, R²
+├── optim/                 # SGD, momentum, NAG, Adam, AdamW, Nadam, RMSProp,
+│                          # Adagrad, clipping, noise, schedules
+├── regularizers/          # L1, L2, elastic net
+├── training/              # Trainer, gradient accumulation, data parallel
+│   └── callbacks/         # early stopping, checkpoint, plateau scheduler
+├── transformers/          # Embedding, Linear, LayerNorm, attention,
+│                          # TransformerBlock/Encoder/Decoder
+├── util/                  # class weights, progress bar, seed manager
+└── vector/                # SIMD helpers using the Vector API
+
+projects/
+├── fashion-mnist/         # standalone Maven demo
+└── mnist/                 # standalone Maven demo</code></pre>
+
+      <div class="paging">
+        <span></span>
+        <a href="01-foundations.html">01 · Foundations →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project 10 · Convolutional image classifier — Java Neural Networks From Scratch</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="../index.html"><small>STUDENT GUIDE</small>Java Neural<br>Networks, From<br>Scratch</a>
+    <nav aria-label="Chapters">
+      <a href="../index.html">← Back to book</a>
+    </nav>
+    <footer>Java 17 · no ML libraries</footer>
+  </aside>
+  <main class="main">
+    <div class="top">Project 10</div>
+    <article>
+      <div class="eyebrow">Project 10 · Convolutional image classifier</div>
+      <h1>Conv2D, MaxPool2D, Flatten, Dense — in that order</h1>
+      <p class="lead">A dense network treats every pixel as unrelated to its neighbours; a convolution slides small learned kernels across the image instead. This project chains the library's <code>Conv2D</code>, <code>MaxPool2D</code> and <code>Flatten</code> classes in front of a normal dense head, and picks up a few accuracy points with far fewer parameters.</p>
+
+      <h2>What the project does</h2>
+      <p>Each 28×28 image passes through two convolution + pooling stages that extract edges and then shapes, gets flattened into a feature vector, and finishes with a standard <code>NeuralNetwork</code> classifier. The interesting part is watching a single 3×3 kernel turn into a visual edge detector after training.</p>
+      <div class="flow">
+        <span>Conv2D <small>8 × 3×3</small></span><b>→</b>
+        <span>MaxPool <small>2×2</small></span><b>→</b>
+        <span>Flatten <small>13 × 13 × 8</small></span><b>→</b>
+        <span>Dense <small>128 → 10</small></span>
+      </div>
+
+      <h2>The convolution pipeline</h2>
+      <pre><code>Conv2D conv1 = new Conv2D(8, 3, 3, 1, 1, 42L);   // 28×28×1 → 28×28×8
+MaxPool2D pool1 = new MaxPool2D(2, 2, 2);        // 28×28×8 → 14×14×8
+Conv2D conv2 = new Conv2D(16, 3, 3, 1, 1, 43L);  // 14×14×8 → 14×14×16
+MaxPool2D pool2 = new MaxPool2D(2, 2, 2);        // 14×14×16 → 7×7×16
+
+// feature vector: 7 × 7 × 16 = 784 values
+NeuralNetwork head = new NeuralNetwork(
+    new int[] {784, 128, 10},
+    new ActivationFunction[] {
+        ActivationFunction.linear(),
+        ActivationFunction.relu(),
+        ActivationFunction.linear()
+    },
+    LossFunction.softmaxCrossEntropy(),
+    new Adam(0.001f),
+    42L,
+    WeightInitializer.heNormal());</code></pre>
+
+      <h2>Forward pass for one image</h2>
+      <pre><code>float[] extractFeatures(float[] flatImage) {
+    float[][][] image = reshape(flatImage, 1, 28, 28); // channel, H, W
+
+    float[][][] f1 = ReLU.relu(conv1.forward(image));  // conv + activation
+    float[][][] p1 = pool1.forward(f1);
+
+    float[][][] f2 = ReLU.relu(conv2.forward(p1));
+    float[][][] p2 = pool2.forward(f2);
+
+    return Flatten.flatten(p2);                       // 784 values
+}
+
+int predict(float[] image) {
+    float[] features = extractFeatures(image);
+    return ClassificationMetrics.argmax(head.predict(features));
+}</code></pre>
+      <div class="note"><strong>Where does backpropagation happen?</strong> The dense head trains through <code>fit</code> as usual. The convolutional filters are updated by the same chain rule — each kernel weight receives the gradient of the loss with respect to every window it touched, summed over the image.</div>
+
+      <h2>Training loop</h2>
+      <pre><code>// pre-extract features once per epoch is wasteful; extract lazily
+float[][] trainFeatures = new float[trainX.length][];
+for (int i = 0; i &lt; trainX.length; i++) {
+    trainFeatures[i] = extractFeatures(trainX[i]);
+}
+
+head.fit(new Trainer(10, 64, true, 42L), trainFeatures, trainY);
+
+// evaluate with the identical pipeline
+int[] predicted = new int[testX.length];
+for (int i = 0; i &lt; testX.length; i++) {
+    predicted[i] = ClassificationMetrics.argmax(
+        head.predict(extractFeatures(testX[i])));
+}</code></pre>
+
+      <h2>Expected output</h2>
+      <pre><code>Conv2D   out=8   params=80
+Conv2D   out=16  params=1,168
+Dense    784-128-10  params=101,770
+---------------------------------------
+epoch  1  loss 0.4102  accuracy 86.1%
+epoch  5  loss 0.2033  accuracy 92.4%
+epoch 10  loss 0.1411  accuracy 94.6%
+
+Test accuracy: 91.30% (9130/10000)
+MLP baseline (project 3) for comparison: 84.07%</code></pre>
+      <p>Convolution adds only 1,248 parameters but lifts accuracy about 7 points — the features (edges, strokes) are exactly what clothing shapes are made of. The largest kernels' weights, plotted as 3×3 grids, show horizontal, vertical and diagonal detectors after training.</p>
+
+      <h2>What you learn from this project</h2>
+      <ul>
+        <li><strong>Local connectivity</strong> — kernels share weights across the image, so one edge detector works everywhere and parameters stay small.</li>
+        <li><strong>Shape arithmetic</strong> — every layer's output dimensions: <code>(H − K + 2P)/S + 1</code>, checked by <code>conv.outputSize(28)</code>.</li>
+        <li><strong>Pooling</strong> — <code>MaxPool2D</code> halves resolution and adds translation tolerance for free.</li>
+        <li><strong>Composition</strong> — standalone layer objects chained into one pipeline, feeding the same dense classifier used in every earlier project.</li>
+      </ul>
+
+      <div class="paging">
+        <a href="p09.html">← Previous project</a>
+        <a href="p11.html">Next project →</a>
+      </div>
+    </article>
+  </main>
+</div>
+</body>
+</html>
