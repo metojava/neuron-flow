@@ -1,6 +1,16 @@
-# Java Deep Learning Framework
+# Java Machine Learning Framework
 
 A small Java 17 machine learning library built with Maven. The main module contains dense neural networks, activation and loss functions, optimizers, IDX dataset loaders, model serialization, and experimental autograd and transformer components. Example applications live under `projects/`; the older `chatgpt-worked/nfs` directory is a separate copy.
+
+this is personal work by using AI : OpenCode and ChatGPT . project is working well 
+but is in development process. not everyting can be perfect at this particular moment 
+that is why if you/user/ decide to use in production or for any reason : 
+take on your own risk. Author/Me/ not taking any kind of responsibility for anything .
+God is main judge and I always remember about .
+project was made with good intentions for anyones profit 
+it is free to use for any reason and no liabilities considered in case of anything. 
+air and sunlight is for everyone . same as AI for good reason
+
 
 ## Build and test
 
