@@ -1,5 +1,7 @@
 # Java Deep Learning Framework
 
+starter is at :  https://github.com/metojava/nfs-lib
+
 A small Java 17 machine learning library built with Maven. The main module contains dense neural networks, activation and loss functions, optimizers, IDX dataset loaders, model serialization, and experimental autograd and transformer components. Example applications live under `projects/`; the older `chatgpt-worked/nfs` directory is a separate copy.
 
 ## Build and test
